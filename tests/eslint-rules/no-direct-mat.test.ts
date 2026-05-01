@@ -19,10 +19,15 @@ describe("no-direct-mat", () => {
           code: "const m = new cv.Mat();",
           filename: "/project/src/opencv/mat-pool.ts",
         },
-        // scope.track 으로 감쌀 때 — 정상 (NewExpression 자체는 발생하지만 허용 파일이 아니어도 wrap 패턴이라 ESLint 자체는 못 잡음)
-        // 이 룰은 NEW 자체를 막는 거라 wrap 여부를 판단 X. 따라서 다른 파일에서 Mat 생성은 무조건 위반.
-        // (실 사용 시 inline eslint-disable comment 로 escape 패턴 명시)
-
+        // scope.track(new cv.Mat()) — 권장 패턴, 허용
+        {
+          code: "function f(scope) { return scope.track(new cv.Mat()); }",
+          filename: "/project/src/opencv/segment.ts",
+        },
+        {
+          code: "function f(scope) { return scope.track(new cv.MatVector()); }",
+          filename: "/project/src/opencv/segment.ts",
+        },
         // cv 가 아닌 객체 — 통과
         {
           code: "const m = new other.Mat();",

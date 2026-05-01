@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest --run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:reject-fixtures": "tsx scripts/build-reject-fixtures.ts"
   },
   "dependencies": {
     "@apps-in-toss/web-framework": "^2.4.7",
@@ -33,6 +34,8 @@
     "globals": "^15.15.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.4.2",
+    "sharp": "^0.34.5",
+    "tsx": "^4.21.0",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.24.1",
     "vite": "^6.2.0",

@@ -58,6 +58,18 @@ const rule = {
         ) {
           return;
         }
+        // 허용 패턴: `scope.track(new cv.Mat())` — 부모가 .track() 호출의 인자
+        const parent = node.parent;
+        if (
+          parent &&
+          parent.type === "CallExpression" &&
+          parent.callee.type === "MemberExpression" &&
+          parent.callee.property.type === "Identifier" &&
+          parent.callee.property.name === "track" &&
+          parent.arguments.includes(node)
+        ) {
+          return;
+        }
         context.report({
           node,
           messageId: "direct",
