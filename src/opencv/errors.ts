@@ -14,7 +14,9 @@ export type AnalysisError =
   | { kind: "multi_coin"; count: number }
   | { kind: "partial_coin" }
   | { kind: "low_brightness"; meanBrightness: number }
-  | { kind: "blur"; laplacianVariance: number };
+  | { kind: "blur"; laplacianVariance: number }
+  | { kind: "no_particles" }
+  | { kind: "memory_oom"; phase: "segment" | "stats" | "pipeline" };
 
 /**
  * 사용자에게 노출할 메시지. 신규 kind 추가 시 case 도 함께 확장 (TS exhaustive).
@@ -36,6 +38,10 @@ export function userMessage(e: AnalysisError): string {
       return "너무 어두워요. 더 밝은 곳에서 촬영해주세요.";
     case "blur":
       return "흔들렸어요. 폰을 고정하고 다시 촬영해주세요.";
+    case "no_particles":
+      return "입자가 검출되지 않았어요. 분쇄가 안 됐거나 원두가 너무 적을 수 있어요.";
+    case "memory_oom":
+      return "사진 크기가 너무 커요. 다시 촬영해주세요.";
   }
 }
 

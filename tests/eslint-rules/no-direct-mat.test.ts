@@ -51,9 +51,9 @@ describe("no-direct-mat", () => {
           errors: [{ messageId: "direct", data: { name: "MatVector" } }],
         },
         {
-          code: "const r = new cv.RotatedRect();",
-          filename: "/project/src/foo.ts",
-          errors: [{ messageId: "direct", data: { name: "RotatedRect" } }],
+          code: "const v = new cv.MatVector();",
+          filename: "/project/src/opencv/foo.ts",
+          errors: [{ messageId: "direct", data: { name: "MatVector" } }],
         },
         // 윈도우 백슬래시 경로 — fake-mat-pool 은 차단되어야 함
         {

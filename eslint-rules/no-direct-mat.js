@@ -9,13 +9,14 @@
  *  - 명시적 인라인 disable (ex: F05 watershed contours/hierarchy 가 escape 시)
  */
 
-const BLOCKED = new Set([
-  "Mat",
-  "MatVector",
-  "RotatedRect",
-  "Size",
-  "Point",
-]);
+/**
+ * 차단 대상 — heap 할당 + .delete() 필요한 OpenCV 클래스만.
+ *
+ * 제외 (plain JS object — heap 미사용):
+ *  - Point / Scalar / Size: 보통 단순 객체 또는 배열로 표현되어 .delete 불필요
+ *  - RotatedRect: 일부 빌드는 Mat 처럼 동작하지만 현재 사용 패턴 없음 (필요 시 추가)
+ */
+const BLOCKED = new Set(["Mat", "MatVector"]);
 
 /**
  * 파일 경로 매칭 — 윈도우 백슬래시도 안전하게 처리.
