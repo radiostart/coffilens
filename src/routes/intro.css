@@ -1,0 +1,31 @@
+.intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  gap: var(--space-md);
+  background: var(--color-bg-page);
+  animation: fadeIn var(--duration-slow) var(--ease-enter);
+  padding: var(--space-xl);
+}
+
+.intro-title {
+  margin-top: var(--space-sm);
+  color: var(--color-text-primary);
+}
+
+.intro-subtitle {
+  color: var(--color-text-secondary);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
