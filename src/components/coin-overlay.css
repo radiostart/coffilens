@@ -1,0 +1,54 @@
+.coin-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+}
+
+.coin-overlay-frame {
+  width: 80%;
+  max-width: 360px;
+  aspect-ratio: 1;
+  border: 2px dashed rgba(255, 255, 255, 0.7);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: var(--space-lg);
+}
+
+.coin-overlay-coin-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.15);
+  position: relative;
+}
+
+.coin-overlay-coin-circle::after {
+  content: "💰";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+}
+
+.coin-overlay-hint {
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-2xl);
+}
+
+.coin-overlay-hint p {
+  color: white;
+  margin: 0;
+}

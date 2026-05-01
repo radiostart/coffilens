@@ -26,6 +26,7 @@ export default tseslint.config(
         { allowConstantExport: true },
       ],
       "local/no-custom-back-button": "error",
+      "local/no-direct-mat": "error",
     },
   },
 );
