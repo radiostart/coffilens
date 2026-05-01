@@ -1,0 +1,135 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { computeStats, percentile } from "../../src/opencv/statistics";
+
+interface MockMat {
+  delete: ReturnType<typeof vi.fn>;
+}
+interface MockMatVector {
+  size: () => number;
+  get: (i: number) => MockMat;
+}
+
+/**
+ * cv mock — areasPx 시퀀스로 contourArea 가 매번 다른 값 반환.
+ * mmPerPixel 입력 결합으로 직경 계산 검증.
+ */
+function setupCvMock(areasPx: number[]) {
+  let i = 0;
+  vi.stubGlobal("cv", {
+    contourArea: vi.fn(() => {
+      const a = areasPx[i % Math.max(1, areasPx.length)];
+      i++;
+      return a ?? 0;
+    }),
+  });
+  const contours: MockMatVector = {
+    size: () => areasPx.length,
+    get: () => ({ delete: vi.fn() }),
+  };
+  return contours;
+}
+
+beforeEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("computeStats — 정상 케이스", () => {
+  it("균일 직경 입자 → D10 ≈ D50 ≈ D90", () => {
+    // mmPerPixel = 0.1 (1px = 0.1mm)
+    // areaPx = π*(50)^2 ≈ 7854 → areaMm2 ≈ 78.54mm² → D = 2*sqrt(78.54/π) ≈ 10mm = 10000μm
+    // 100개 동일 입자
+    const areasPx = Array(100).fill(7854);
+    const contours = setupCvMock(areasPx);
+    const stats = computeStats(contours, 0.1);
+
+    expect(stats.particleCount).toBe(100);
+    expect(stats.d10).toBeCloseTo(stats.d50, 0);
+    expect(stats.d50).toBeCloseTo(stats.d90, 0);
+    // 직경 약 10000μm
+    expect(stats.d50).toBeCloseTo(10000, -2);
+  });
+
+  it("D10 < D50 < D90 단조 증가", () => {
+    // 직경 100~1000μm 분포 (areaPx = (D/2 / mmPerPixel * 1000)^2 * π / 1000^2 * mmPerPixel^2 ...)
+    // 단순화: 면적값 작은 → 큰 순서로 입력. mmPerPixel = 0.05
+    // areaMm2 = areaPx * 0.0025 (mmPerPixel^2)
+    // D = 2*sqrt(areaMm2/π) * 1000 (μm)
+    // areaPx 100~10000 이면 D 가 100μm~1000μm 근방
+    const areasPx = Array.from({ length: 100 }, (_, i) => 200 + i * 100);
+    const contours = setupCvMock(areasPx);
+    const stats = computeStats(contours, 0.05);
+
+    expect(stats.d10).toBeLessThan(stats.d50);
+    expect(stats.d50).toBeLessThan(stats.d90);
+    expect(stats.uniformity).toBeGreaterThan(1);
+  });
+
+  it("diameters 배열이 정렬되어 반환", () => {
+    const contours = setupCvMock([1000, 500, 2000, 100]); // 무작위 순서
+    const stats = computeStats(contours, 0.1);
+    for (let i = 1; i < stats.diameters.length; i++) {
+      expect(stats.diameters[i]).toBeGreaterThanOrEqual(
+        stats.diameters[i - 1],
+      );
+    }
+  });
+});
+
+describe("computeStats — 가드", () => {
+  it("contours 가 비어있을 때 throw", () => {
+    const contours = setupCvMock([]);
+    expect(() => computeStats(contours, 0.1)).toThrow(
+      /입자 0개|빈 배열/,
+    );
+  });
+
+  it("100μm 미만 입자 필터링", () => {
+    // 매우 작은 areaPx → 직경 100μm 미만 → 필터 후 0개
+    // areaPx=1, mmPerPixel=0.01 → areaMm2 = 0.0001, D = 2*sqrt(0.0001/π)*1000 ≈ 11.3μm
+    const contours = setupCvMock([1, 1, 1, 1]);
+    expect(() => computeStats(contours, 0.01)).toThrow(/입자 0개/);
+  });
+
+  it("100μm 미만 + 정상 입자 혼합 → 정상만 반환", () => {
+    // 작은 입자 (필터됨) + 정상 (유지)
+    // mmPerPixel = 0.05
+    // small: areaPx=1 → D ≈ 56μm (필터)
+    // normal: areaPx=10000 → areaMm2=25, D=2*sqrt(25/π)*1000 ≈ 5642μm (유지)
+    const contours = setupCvMock([1, 10000, 1, 10000, 10000]);
+    const stats = computeStats(contours, 0.05);
+    expect(stats.particleCount).toBe(3);
+  });
+
+  it("Fines% 계산 — 300μm 미만 면적 비율", () => {
+    // 큰 입자 + 작은 입자 (>100μm)
+    // mmPerPixel = 0.05
+    // small (~150μm): areaPx 가 어떻게? D=150μm → R=75μm → A=π*75^2 = 17671μm² → 17671e-6 mm²
+    // = 0.0177 mm² / mmPerPixel^2 (0.0025) = 7.07 px → 약 7
+    // 큰 (~1000μm): D=1000μm → R=500μm → A=π*250000 = 785398μm² = 0.785 mm² → 314 px
+    const contours = setupCvMock([7, 7, 7, 314, 314]); // 3 small + 2 large
+    const stats = computeStats(contours, 0.05);
+    expect(stats.particleCount).toBeGreaterThan(0);
+    expect(stats.finesPercent).toBeGreaterThan(0);
+    expect(stats.finesPercent).toBeLessThan(100);
+  });
+});
+
+describe("percentile", () => {
+  it("빈 배열 throw", () => {
+    expect(() => percentile([], 0.5)).toThrow();
+  });
+
+  it("단일 값 반환", () => {
+    expect(percentile([42], 0.5)).toBe(42);
+  });
+
+  it("선형 보간 (linear interpolation)", () => {
+    expect(percentile([1, 2, 3, 4, 5], 0.5)).toBe(3);
+    expect(percentile([1, 2, 3, 4], 0.5)).toBe(2.5); // 중간값 보간
+  });
+
+  it("0 → 첫번째, 1 → 마지막", () => {
+    expect(percentile([10, 20, 30], 0)).toBe(10);
+    expect(percentile([10, 20, 30], 1)).toBe(30);
+  });
+});

@@ -5,6 +5,7 @@ import { ToolSelectRoute } from "./routes/tool-select";
 import { CaptureGuideRoute } from "./routes/capture-guide";
 import { CameraRoute } from "./routes/camera";
 import { AnalyzingRoute } from "./routes/analyzing";
+import { ResultRoute } from "./routes/result";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
       <Route path="/capture-guide" component={CaptureGuideRoute} />
       <Route path="/camera" component={CameraRoute} />
       <Route path="/analyzing" component={AnalyzingRoute} />
+      <Route path="/result" component={ResultRoute} />
       <Route>
         <Redirect to="/intro" />
       </Route>
