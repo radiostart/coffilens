@@ -8,9 +8,11 @@ import {
 } from "../components/confidence-bar";
 import { DisclaimerBanner } from "../components/disclaimer-banner";
 import { useMeasurementStore, type ToolId } from "../stores/measurement.store";
+import { useHistoryStore } from "../stores/history.store";
 import { userMessage } from "../opencv/errors";
 import { buildMessages } from "../recommendation/messages";
 import { getOtherTools } from "../recommendation/matrix";
+import { makeThumbnail } from "../lib/thumbnail";
 import "./result.css";
 
 /**
@@ -31,10 +33,14 @@ export function ResultRoute() {
   const result = useMeasurementStore((s) => s.result);
   const error = useMeasurementStore((s) => s.error);
   const tool = useMeasurementStore((s) => s.tool);
+  const frame = useMeasurementStore((s) => s.frame);
   const setTool = useMeasurementStore((s) => s.setTool);
+  const saveHistory = useHistoryStore((s) => s.save);
   const [, setLocation] = useLocation();
   const [saved, setSaved] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [cleanedCount, setCleanedCount] = useState(0);
 
   // toast 자동 제거
   useEffect(() => {
@@ -99,10 +105,31 @@ export function ResultRoute() {
         : "error";
   const otherTools = getOtherTools(tool);
 
-  function handleSave() {
-    // F08 에서 IndexedDB 저장으로 교체. 현재는 in-memory 표시만.
-    setSaved(true);
-    setSavedAt(Date.now());
+  async function handleSave() {
+    if (!result || !tool) return;
+    try {
+      setSaveError(null);
+      const thumbnail = frame
+        ? await makeThumbnail(frame)
+        : new Blob([new Uint8Array(0)], { type: "image/jpeg" });
+      const { cleanedCount: cleaned } = await saveHistory({
+        tool,
+        thumbnail,
+        d50: result.stats.d50,
+        d10: result.stats.d10,
+        d90: result.stats.d90,
+        uniformity: result.stats.uniformity,
+        finesPercent: result.stats.finesPercent,
+        confidence: result.confidence.score,
+        coinType: result.coin.coinType,
+      });
+      setCleanedCount(cleaned);
+      setSaved(true);
+      setSavedAt(Date.now());
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "저장 실패";
+      setSaveError(msg);
+    }
   }
 
   function handleSwitchTool(t: ToolId) {
@@ -204,11 +231,22 @@ export function ResultRoute() {
         <DisclaimerBanner />
 
         {/* CTA */}
+        {saveError && (
+          <p
+            role="alert"
+            className="text-body"
+            style={{ color: "var(--color-error)" }}
+          >
+            저장 실패: {saveError}
+          </p>
+        )}
         {!saved ? (
           <button
             type="button"
             className="btn-primary result-save-cta"
-            onClick={handleSave}
+            onClick={() => {
+              void handleSave();
+            }}
           >
             측정 저장
           </button>
@@ -221,6 +259,11 @@ export function ResultRoute() {
                 aria-live="polite"
               >
                 ✓ 측정 기록이 저장되었어요
+                {cleanedCount > 0 && (
+                  <span className="text-caption">
+                    {" "}· 오래된 기록 {cleanedCount}개를 정리했어요
+                  </span>
+                )}
               </p>
             )}
             <section
