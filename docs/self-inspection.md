@@ -97,11 +97,44 @@ Failure Modes Registry 16개 → 코드 매핑:
 
 ## 출시 전 잔여 작업
 
-- [ ] D0 anchor fixture 촬영 (사용자 손 작업) → `fixtures/grind-anchor-{NNN}.jpg` + `manifest.json`
-- [ ] 종료 모달 텍스트 토스 가이드 1:1 매치 검증 (D10 → `docs/inspection-evidence.md`)
-- [ ] 토스 콘솔 미니앱 등록 + API 키 → `.env`
-- [ ] 베타 5명 5일 사용 (F11 D13~17)
-- [ ] 실 기기 검증 — 카메라 권한, AOS 백버튼 종료, 다양한 폰
+### D0 / D2 / D10 (사용자 손작업)
+- [ ] D0 anchor fixture 촬영 → `fixtures/grind-anchor-{NNN}.jpg` + `manifest.json`
+- [ ] D0 토스 콘솔 미니앱 등록 + API 키 → `.env`
+- [ ] D2 아이콘 확정 + 등록
+- [ ] D10 종료 모달 텍스트 토스 가이드 1:1 매치 검증 → `docs/inspection-evidence.md`
+
+### D12 — 실기기 시나리오 (F11)
+
+**iOS + AOS 각 1대 이상**:
+
+#### 핵심 플로우
+- [ ] 인트로 → 홈 → 도구 → 가이드 → 카메라 → 분석 → 결과 → 저장 → 홈 (정상)
+- [ ] 측정 기록 5건 누적 후 홈 진입 (가상 스크롤은 Phase 1 검토)
+- [ ] 분석 중 취소 → 홈 복귀 (AbortSignal)
+- [ ] 종료 모달 → 종료하기 / 취소 두 분기 모두
+
+#### 에러 플로우
+- [ ] 동전 없이 촬영 → no_coin reject + 재촬영 가이드
+- [ ] 동전 2개 → multi_coin reject
+- [ ] 카메라 권한 거부 → PermissionDeniedScreen + 설정 진입 안내
+- [ ] OpenCV.js 다운로드 실패 시뮬레이션 (네트워크 차단) → 재시도
+- [ ] 100건+ 측정 → 쿼터 정리 자동 + 토스트 안내
+
+#### 검수 항목 visual 확인
+- [ ] nav-bar 백버튼 정상 (자체 버튼 0개)
+- [ ] 종료 모달 텍스트 1:1 매치
+- [ ] AOS 시스템 백버튼 동작
+- [ ] 외부 링크 0개
+
+### D13~17 — 베타 (F11)
+- [ ] 베타 5명 모두 최소 3회 측정 (sweep Issue 32: 최소 4명 fallback)
+- [ ] P0/P1 버그 모두 처리
+- [ ] `docs/beta-feedback.md` 마감
+
+### D18 — 검수 제출 (F11)
+- [ ] 토스 콘솔 검수 요청 + `docs/inspection-submission.md` 작성
+- [ ] git tag `v1.0.0-rc1` (sweep Issue 33 절차)
+- [ ] 반려 시 사유별 대응 PR (평균 1~2회, 회당 5~10일)
 
 ## Evidence 첨부 가이드
 
