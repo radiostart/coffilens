@@ -1,0 +1,47 @@
+.confidence-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.confidence-bar-track {
+  height: 8px;
+  background: var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.confidence-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  transition: width var(--duration-base) var(--ease-enter);
+}
+
+.confidence-bar-label {
+  color: var(--color-text-secondary);
+}
+
+.variant-success .confidence-bar-fill {
+  background: var(--color-success);
+}
+
+.variant-warning .confidence-bar-fill {
+  background: var(--color-warning);
+}
+
+.variant-error .confidence-bar-fill {
+  background: var(--color-error);
+}
+
+.variant-warning .confidence-bar-label,
+.variant-error .confidence-bar-label {
+  color: var(--color-text-primary);
+}
+
+.confidence-bar-warning {
+  color: var(--color-warning);
+}
+
+.variant-error .confidence-bar-warning {
+  color: var(--color-error);
+}

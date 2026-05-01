@@ -1,0 +1,27 @@
+.disclaimer-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  border: 1px solid var(--color-warning);
+  margin: var(--space-md) 0;
+}
+
+.disclaimer-banner-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.disclaimer-banner-text {
+  font-size: var(--text-body);
+  line-height: var(--text-body-line);
+  color: var(--color-warning);
+  margin: 0;
+}
+
+.disclaimer-banner-text strong {
+  font-weight: 700;
+}
