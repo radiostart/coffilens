@@ -6,6 +6,7 @@ import { runPipeline, type PipelineStep } from "../opencv/pipeline";
 import { userMessage } from "../opencv/errors";
 import type { AnalysisError } from "../opencv/errors";
 import { useMeasurementStore } from "../stores/measurement.store";
+import { getTelemetryClient } from "../telemetry/client";
 import "./analyzing.css";
 
 type State =
@@ -50,8 +51,10 @@ export function AnalyzingRoute() {
 
     const ac = new AbortController();
     abortRef.current = ac;
+    const startedAt = performance.now();
 
     (async () => {
+      const tel = await getTelemetryClient();
       try {
         // OpenCV 로드 — 0~20%
         await loadOpenCV({
@@ -76,6 +79,12 @@ export function AnalyzingRoute() {
         });
 
         setResult(result);
+        tel.track({
+          type: "measurement_success",
+          durationMs: Math.round(result.durationMs),
+          confidence: result.confidence.score,
+          coinType: result.coin.coinType,
+        });
         setLocation("/result");
       } catch (e: unknown) {
         if (ac.signal.aborted) return;
@@ -89,6 +98,7 @@ export function AnalyzingRoute() {
             (e as { cause?: "network" | "cors" | "timeout" }).cause ??
             "network";
           setError({ kind: "opencv_load_fail", cause });
+          tel.track({ type: "opencv_load_fail", cause });
           setState({
             kind: "error",
             message: userMessage({ kind: "opencv_load_fail", cause }),
@@ -98,6 +108,11 @@ export function AnalyzingRoute() {
 
         if (isAnalysisError(e)) {
           setError(e);
+          tel.track({
+            type: "measurement_fail",
+            failReason: e.kind,
+            durationMs: Math.round(performance.now() - startedAt),
+          });
           setState({ kind: "error", message: userMessage(e) || "분석 실패" });
           return;
         }

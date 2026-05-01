@@ -4,6 +4,7 @@ import {
   useMeasurementStore,
   type ToolId,
 } from "../stores/measurement.store";
+import { getTelemetryClient } from "../telemetry/client";
 import "./tool-select.css";
 
 interface Tool {
@@ -26,6 +27,9 @@ export function ToolSelectRoute() {
 
   function handleSelect(id: ToolId) {
     setTool(id);
+    void getTelemetryClient().then((c) =>
+      c.track({ type: "measurement_attempt", toolKind: id }),
+    );
     setLocation("/capture-guide");
   }
 
