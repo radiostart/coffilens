@@ -7,25 +7,16 @@
 
 export type CameraPermissionState = "granted" | "denied" | "prompt";
 
-interface PermissionsApi {
-  query: (descriptor: { name: PermissionName | "camera" }) => Promise<{
-    state: CameraPermissionState;
-  }>;
-}
-
-declare global {
-  interface Navigator {
-    permissions?: PermissionsApi;
-  }
-}
-
 export async function checkCameraPermission(): Promise<CameraPermissionState> {
   if (typeof navigator === "undefined" || !navigator.permissions) {
     return "prompt";
   }
   try {
-    const result = await navigator.permissions.query({ name: "camera" });
-    return result.state;
+    // 'camera' 는 Permissions API spec 이지만 lib.dom 의 PermissionName 에 없음 — cast.
+    const result = await navigator.permissions.query({
+      name: "camera" as PermissionName,
+    });
+    return result.state as CameraPermissionState;
   } catch {
     // Safari 일부 버전 — Permissions API 가 'camera' 미지원
     return "prompt";
@@ -79,8 +70,10 @@ export async function lockPortraitOrientation(): Promise<void> {
     "lock" in screen.orientation
   ) {
     try {
-      // @ts-expect-error - lock 은 일부 브라우저만 지원
-      await screen.orientation.lock("portrait");
+      const orientation = screen.orientation as ScreenOrientation & {
+        lock?: (orientation: string) => Promise<void>;
+      };
+      await orientation.lock?.("portrait");
     } catch {
       // 데스크톱/Safari 등 미지원 — silently skip
     }
@@ -95,8 +88,10 @@ export function unlockOrientation(): void {
     "unlock" in screen.orientation
   ) {
     try {
-      // @ts-expect-error - unlock 은 일부 브라우저만
-      screen.orientation.unlock();
+      const orientation = screen.orientation as ScreenOrientation & {
+        unlock?: () => void;
+      };
+      orientation.unlock?.();
     } catch {
       // ignore
     }

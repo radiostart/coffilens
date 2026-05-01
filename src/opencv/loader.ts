@@ -8,8 +8,6 @@
  * - 동시 호출 시 단일 promise 공유 (중복 다운로드 방지)
  */
 
-import type { AnalysisError } from "./errors";
-
 declare global {
   interface Window {
     cv?: { onRuntimeInitialized?: () => void } & Record<string, unknown>;
@@ -32,12 +30,12 @@ export interface LoaderOptions {
   signal?: AbortSignal;
 }
 
+export type OpenCVLoadCause = "network" | "cors" | "timeout";
+
 export class OpenCVLoadError extends Error {
   readonly kind = "opencv_load_fail";
   constructor(
-    public readonly cause: AnalysisError extends { kind: "opencv_load_fail" }
-      ? AnalysisError["cause"]
-      : never,
+    public readonly cause: OpenCVLoadCause,
     public readonly underlying?: unknown,
   ) {
     super(`OpenCV.js 로드 실패 (${cause})`);

@@ -55,8 +55,8 @@ export default function HistogramImpl({
               border: "1px solid var(--color-border)",
               fontSize: 12,
             }}
-            formatter={(value: number) => [`${value}개`, "입자 수"]}
-            labelFormatter={(label: number) => `${label}μm 부터`}
+            formatter={(value) => [`${value}개`, "입자 수"]}
+            labelFormatter={(label) => `${label}μm 부터`}
           />
           <Bar dataKey="count" fill={PRIMARY_COLOR} radius={[4, 4, 0, 0]} />
         </BarChart>
