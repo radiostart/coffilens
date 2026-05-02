@@ -320,11 +320,16 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
   if (diameters.length === 0) return [];
   const sorted = [...diameters].sort((a, b) => a - b);
   const total = sorted.length;
-  const min = sorted[0];
+  // **D5-D95 범위 binning** (2026-05-02): 이전 min~P95 → P5~P95 으로 변경.
+  // 양쪽 outlier 5% 제외 시 bins 가 dense 영역만 cover → empty bin gap 감소.
+  // 사용자 보고: log-normal 분포에서 sparse outlier 영역의 빈 bin 이 시각화
+  // 왜곡. 이제 outlier 들은 leftmost / rightmost grey "outlier" bar 로 통합 표시.
+  const p5Index = Math.floor(total * 0.05);
   const p95Index = Math.floor(total * 0.95);
+  const lowerBound = sorted[Math.min(p5Index, total - 1)];
   const upperBound = sorted[Math.min(p95Index, total - 1)];
 
-  const logMin = Math.log10(min);
+  const logMin = Math.log10(lowerBound);
   const logMax = Math.log10(upperBound);
   const logBinWidth = (logMax - logMin) / bins;
 

@@ -18,10 +18,10 @@ interface HistogramProps {
 
 export function Histogram({
   diameters,
-  // bins 25 (2026-05-02 final): 20 (단봉화) 와 40 (지나치게 잘게) 사이 절충.
-  // 의미 있는 분포 모양 (bimodal 가시화) 보존하면서 인접 bin 들의 작은 차이는
-  // 자연 흡수. 다른 AI 비평 "매끈" + 사용자 "잘게 쪼개진 의미없는 차이" 동시 대응.
-  bins = 25,
+  // bins 18 (2026-05-02 final): 25 에서 여전히 빈 bin 발생. P5-P95 범위로
+  // bin 적용 (buildBins) + 18 bins 로 합치기. log-normal 분포의 dense 영역
+  // 시각화 + outlier 는 leftmost/rightmost grey bar 로 별도 표시.
+  bins = 18,
   d10,
   d50,
   d90,
