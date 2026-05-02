@@ -25,18 +25,12 @@ function generateId(): string {
 }
 
 export async function saveRecord(input: SaveInput): Promise<RecordEntity> {
+  // 입력 input 의 모든 필드를 복사 — diameters, mmPerPixel, clumps* 등
+  // optional 필드 누락 방지 (이전 버그: 명시 복사 시 신규 필드 silently 탈락).
   const full: RecordEntity = {
+    ...input,
     id: input.id ?? generateId(),
     timestamp: input.timestamp ?? Date.now(),
-    thumbnail: input.thumbnail,
-    d50: input.d50,
-    d10: input.d10,
-    d90: input.d90,
-    uniformity: input.uniformity,
-    finesPercent: input.finesPercent,
-    confidence: input.confidence,
-    coinType: input.coinType,
-    grinderMemo: input.grinderMemo,
   };
 
   const db = await openDB();
