@@ -26,7 +26,7 @@ import type { CoinDetection } from "./coin-detect";
 import type { AnalysisError } from "./errors";
 
 declare const cv: {
-  imread: (canvas: HTMLCanvasElement) => CvMat;
+  imread: (canvas: HTMLCanvasElement | OffscreenCanvas) => CvMat;
   cvtColor: (src: CvMat, dst: CvMat, code: number) => void;
   adaptiveThreshold: (
     src: CvMat,
@@ -161,7 +161,7 @@ export interface ParticleSegmentation {
  *  - contours / hierarchy 는 caller-managed → 반드시 disposeSegmentation() 호출.
  */
 export async function segmentParticles(
-  canvas: HTMLCanvasElement,
+  canvas: HTMLCanvasElement | OffscreenCanvas,
   coin: CoinDetection,
 ): Promise<ParticleSegmentation> {
   return withMatScope(async (scope) => {

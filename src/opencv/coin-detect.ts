@@ -12,7 +12,7 @@ import { withMatScope } from "./mat-pool";
 import type { AnalysisError } from "./errors";
 
 declare const cv: {
-  imread: (canvas: HTMLCanvasElement) => CvMat;
+  imread: (canvas: HTMLCanvasElement | OffscreenCanvas) => CvMat;
   cvtColor: (src: CvMat, dst: CvMat, code: number) => void;
   medianBlur: (src: CvMat, dst: CvMat, ksize: number) => void;
   HoughCircles: (
@@ -75,7 +75,7 @@ const MIN_LAPLACIAN_VAR = 100;
  * 불합격 시 AnalysisError throw (low_brightness | blur).
  */
 export async function checkInputQuality(
-  canvas: HTMLCanvasElement,
+  canvas: HTMLCanvasElement | OffscreenCanvas,
 ): Promise<InputQualityResult> {
   return withMatScope(async (scope) => {
     const src = scope.track(cv.imread(canvas));
@@ -292,7 +292,7 @@ function meanIntensityRingOutside(
  * coinType 은 사용자가 촬영 전 선택 (coin-select 화면) — auto-classify 안 함.
  */
 export async function detectCoin(
-  canvas: HTMLCanvasElement,
+  canvas: HTMLCanvasElement | OffscreenCanvas,
   coinType: "100" | "500",
   coinHint?: { x: number; y: number } | null,
 ): Promise<CoinDetection> {

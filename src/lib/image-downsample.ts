@@ -4,24 +4,31 @@
  * WebView 메모리 피크 ~150MB → ~70MB 절감 (plain.md Section 6).
  * 분석 정확도는 영향 없음 (입자 분리에 충분).
  *
- * 입력: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement
- * 출력: HTMLCanvasElement (긴변 ≤ 1280)
+ * 입력: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas
+ * 출력: HTMLCanvasElement | OffscreenCanvas (긴변 ≤ 1280)
+ *
+ * Worker context 지원: document 없으면 OffscreenCanvas 사용.
  */
 
 const TARGET_LONG_EDGE = 1280;
+
+type SourceLike =
+  | HTMLVideoElement
+  | HTMLImageElement
+  | HTMLCanvasElement
+  | OffscreenCanvas;
+type CanvasLike = HTMLCanvasElement | OffscreenCanvas;
 
 interface SourceDimensions {
   width: number;
   height: number;
 }
 
-function getDimensions(
-  source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement,
-): SourceDimensions {
-  if (source instanceof HTMLVideoElement) {
+function getDimensions(source: SourceLike): SourceDimensions {
+  if (typeof HTMLVideoElement !== "undefined" && source instanceof HTMLVideoElement) {
     return { width: source.videoWidth, height: source.videoHeight };
   }
-  if (source instanceof HTMLImageElement) {
+  if (typeof HTMLImageElement !== "undefined" && source instanceof HTMLImageElement) {
     return {
       width: source.naturalWidth || source.width,
       height: source.naturalHeight || source.height,
@@ -30,9 +37,18 @@ function getDimensions(
   return { width: source.width, height: source.height };
 }
 
-export function downsampleImage(
-  source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement,
-): HTMLCanvasElement {
+function createCanvas(width: number, height: number): CanvasLike {
+  // worker context: document 없음 → OffscreenCanvas 사용.
+  if (typeof document === "undefined") {
+    return new OffscreenCanvas(width, height);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+export function downsampleImage(source: SourceLike): CanvasLike {
   const { width: srcW, height: srcH } = getDimensions(source);
   if (srcW === 0 || srcH === 0) {
     throw new Error("downsampleImage: source dimensions are zero");
@@ -43,18 +59,18 @@ export function downsampleImage(
   const dstW = Math.round(srcW * scale);
   const dstH = Math.round(srcH * scale);
 
-  const canvas = document.createElement("canvas");
-  canvas.width = dstW;
-  canvas.height = dstH;
-  // NOTE: willReadFrequently:true 시도했으나 일부 브라우저에서 canvas
-  // 렌더링 path 변경 → 픽셀값 미세 차이 → HoughCircles 결과 변화 →
-  // coin filter edge case 영향 (실측: |int-ext| 59 → 73 으로 변동, 70 임계
-  // flip). 결정적 동작 우선 → 옵션 미사용. perf 경고는 차후 OpenCV
-  // 내부 canvas 처리 개선 시 함께 해결.
+  const canvas = createCanvas(dstW, dstH);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("downsampleImage: 2d context unavailable");
 
-  ctx.drawImage(source, 0, 0, dstW, dstH);
+  // OffscreenCanvas drawImage 도 동일 시그니처. CanvasImageSource 타입 호환.
+  (ctx as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D).drawImage(
+    source as CanvasImageSource,
+    0,
+    0,
+    dstW,
+    dstH,
+  );
   return canvas;
 }
 

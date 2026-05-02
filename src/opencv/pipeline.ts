@@ -50,7 +50,11 @@ export interface PipelineCallbacks {
 }
 
 export async function runPipeline(
-  source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement,
+  source:
+    | HTMLVideoElement
+    | HTMLCanvasElement
+    | HTMLImageElement
+    | OffscreenCanvas,
   coinType: CoinType,
   signal: AbortSignal,
   callbacks: PipelineCallbacks = {},

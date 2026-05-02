@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { NavBar } from "../components/nav-bar";
-import { loadOpenCV, OpenCVLoadError } from "../opencv/loader";
-import { runPipeline, type PipelineStep } from "../opencv/pipeline";
+import { OpenCVLoadError } from "../opencv/loader";
+import { downsampleImage } from "../lib/image-downsample";
+import {
+  runAnalysisInWorker,
+  type AnalysisHandle,
+} from "../lib/analysis-worker-client";
+import type { PipelineStep } from "../opencv/pipeline";
 import type { AnalysisError } from "../opencv/errors";
 import { useMeasurementStore } from "../stores/measurement.store";
 import { getTelemetryClient } from "../telemetry/client";
@@ -38,6 +43,8 @@ export function AnalyzingRoute() {
   const setError = useMeasurementStore((s) => s.setError);
   const [, setLocation] = useLocation();
   const abortRef = useRef<AbortController | null>(null);
+  // Worker handle ref — handleCancel 즉시 worker.terminate() 가능.
+  const workerHandleRef = useRef<AnalysisHandle | null>(null);
   const [state, setState] = useState<State>({
     kind: "loading_opencv",
     progress: 0,
@@ -66,37 +73,39 @@ export function AnalyzingRoute() {
     (async () => {
       const tel = await getTelemetryClient();
       try {
-        // OpenCV 로드 — 0~20%
-        // signal 을 넘기지 않음: 로드는 idempotent + fast (10MB 로컬). React StrictMode 의
-        // cleanup 으로 인한 abort 가 캐시된 promise 를 poison 시켜 mount-2 가 무한 retry 하는
-        // race 회피. 사용자 cancel 은 ac.signal.aborted 체크로 대신 처리.
-        await loadOpenCV({
-          onProgress: (l, t) => {
-            if (ac.signal.aborted) return;
-            setState({
-              kind: "loading_opencv",
-              progress: t > 0 ? l / t : 0,
-            });
-          },
-        });
+        // **Worker 사용** (2026-05-02): OpenCV 가 main thread 를 블록해서
+        // "취소" 버튼이 즉시 안 동작하던 문제 해결. worker.terminate() 으로
+        // HoughCircles 도중에도 즉시 cancel 가능.
+        //
+        // Main thread 작업: 카메라 frame → 1280×960 다운샘플 → ImageData 추출
+        // → worker 에 transfer (zero-copy).
+        if (ac.signal.aborted) return;
+        setState({ kind: "analyzing", step: "downsample", progress: 0.05 });
+
+        const downsampled = downsampleImage(frame);
+        const dctx = downsampled.getContext("2d");
+        if (!dctx) throw new Error("downsample canvas: 2d context null");
+        const imageData = dctx.getImageData(
+          0,
+          0,
+          downsampled.width,
+          downsampled.height,
+        );
 
         if (ac.signal.aborted) return;
 
-        // 분석 파이프라인 — 진행률 0~100% 을 20~100% 구간으로 매핑
-        // coinHint (사용자가 /coin-locate 에서 탭한 위치) 가 있으면 detectCoin 이
-        // hint 가장 가까운 candidate 채택 + multi_coin 검사 우회.
-        const result = await runPipeline(
-          frame,
-          coinType,
-          ac.signal,
-          {
-            onProgress: (step, percent) => {
-              if (ac.signal.aborted) return;
-              setState({ kind: "analyzing", step, progress: percent / 100 });
-            },
+        const handle = runAnalysisInWorker(imageData, coinType, coinHint, {
+          onProgress: (step, percent) => {
+            if (ac.signal.aborted) return;
+            setState({ kind: "analyzing", step, progress: percent / 100 });
           },
-          coinHint,
-        );
+        });
+        workerHandleRef.current = handle;
+
+        const result = await handle.promise;
+        workerHandleRef.current = null;
+
+        if (ac.signal.aborted) return;
 
         setResult(result);
         tel.track({
@@ -169,11 +178,17 @@ export function AnalyzingRoute() {
 
     return () => {
       ac.abort();
+      // Cleanup: worker 가 진행 중이면 즉시 종료.
+      workerHandleRef.current?.terminate();
+      workerHandleRef.current = null;
     };
   }, [frame, coinType, coinHint, setError, setLocation, setResult]);
 
   function handleCancel() {
     abortRef.current?.abort();
+    // Worker 즉시 종료 — HoughCircles 도중이라도 main thread 즉시 자유.
+    workerHandleRef.current?.terminate();
+    workerHandleRef.current = null;
     setLocation("/home");
   }
 
