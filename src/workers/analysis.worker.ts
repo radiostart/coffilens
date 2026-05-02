@@ -112,6 +112,14 @@ self.onmessage = async (e: MessageEvent<AnalyzeMessage>) => {
     // primitive + array. 직접 postMessage 가능.
     self.postMessage({ type: "result", data: result });
   } catch (err: unknown) {
+    // 진짜 에러를 console.error 로 노출 (worker → DevTools console 전달).
+    // catch-all OOM fallback 으로 인한 디버그 어려움 방지.
+    console.error("[worker] analysis failed", err);
+    if (err instanceof Error) {
+      console.error("[worker] error message:", err.message);
+      console.error("[worker] error stack:", err.stack);
+    }
+
     // AnalysisError ({ kind: ... }) 또는 일반 Error.
     if (
       err &&

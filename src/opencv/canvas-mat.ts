@@ -21,12 +21,19 @@ interface CvMat {
 declare const cv: {
   imread?: (canvas: HTMLCanvasElement | OffscreenCanvas) => CvMat;
   matFromImageData?: (imageData: ImageData) => CvMat;
+  Mat: new (
+    rows?: number,
+    cols?: number,
+    type?: number,
+    data?: ArrayLike<number>,
+  ) => CvMat;
+  CV_8UC4?: number;
 };
 
 export function imreadFromCanvas(
   canvas: HTMLCanvasElement | OffscreenCanvas,
 ): CvMat {
-  // Main thread (HTMLCanvasElement) — cv.imread 그대로 사용. 테스트 mock 호환.
+  // Path 1: HTMLCanvasElement (main thread, 테스트) → cv.imread.
   if (
     typeof HTMLCanvasElement !== "undefined" &&
     canvas instanceof HTMLCanvasElement &&
@@ -35,15 +42,23 @@ export function imreadFromCanvas(
     return cv.imread(canvas);
   }
 
-  // Worker context (OffscreenCanvas) — getImageData → matFromImageData.
+  // Worker / OffscreenCanvas — ImageData 직접 추출.
   const ctx = canvas.getContext("2d") as
     | CanvasRenderingContext2D
     | OffscreenCanvasRenderingContext2D
     | null;
   if (!ctx) throw new Error("imreadFromCanvas: 2d context unavailable");
-  if (typeof cv.matFromImageData !== "function") {
-    throw new Error("imreadFromCanvas: cv.matFromImageData unavailable");
-  }
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  return cv.matFromImageData(imageData);
+
+  // Path 2: cv.matFromImageData (OpenCV.js 표준 API).
+  if (typeof cv.matFromImageData === "function") {
+    return cv.matFromImageData(imageData);
+  }
+
+  // Path 3: manual Mat 생성 (OpenCV.js 일부 빌드는 matFromImageData 미노출).
+  // CV_8UC4 = 24. constants 가 init 전이거나 안 노출된 경우 hardcoded value 사용.
+  const type = typeof cv.CV_8UC4 === "number" ? cv.CV_8UC4 : 24;
+  const mat = new cv.Mat(imageData.height, imageData.width, type);
+  mat.data.set(imageData.data);
+  return mat;
 }
