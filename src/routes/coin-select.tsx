@@ -14,18 +14,20 @@ interface Coin {
   iconLabel: string;
 }
 
+// 500원 먼저 — 사용자 결정 (2026-05-02). 더 큰 동전이 검출 정확도 높고
+// 일반적으로 더 자주 사용. 100원은 보조.
 const COINS: Coin[] = [
-  {
-    id: "100",
-    name: "100원",
-    desc: "직경 24.0mm — 이순신 장군",
-    iconLabel: "100",
-  },
   {
     id: "500",
     name: "500원",
     desc: "직경 26.5mm — 학",
     iconLabel: "500",
+  },
+  {
+    id: "100",
+    name: "100원",
+    desc: "직경 24.0mm — 이순신 장군",
+    iconLabel: "100",
   },
 ];
 
