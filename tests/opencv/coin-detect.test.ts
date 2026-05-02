@@ -20,12 +20,14 @@ interface MockCv {
   imread: ReturnType<typeof vi.fn>;
   cvtColor: ReturnType<typeof vi.fn>;
   medianBlur: ReturnType<typeof vi.fn>;
+  GaussianBlur: ReturnType<typeof vi.fn>;
   HoughCircles: ReturnType<typeof vi.fn>;
   Laplacian: ReturnType<typeof vi.fn>;
   meanStdDev: ReturnType<typeof vi.fn>;
   mean: ReturnType<typeof vi.fn>;
   Mat: ReturnType<typeof vi.fn>;
   MatVector: ReturnType<typeof vi.fn>;
+  Size: ReturnType<typeof vi.fn>;
   COLOR_RGBA2GRAY: number;
   HOUGH_GRADIENT: number;
   CV_64F: number;
@@ -85,14 +87,16 @@ function setupCvMock(opts: {
 
   // detectCoin 의 new cv.Mat() 순서 (2026-05-02 변경 후):
   //   1. grayOriginal (sharp edge 보존, gradient 측정용)
-  //   2. gray (blur 적용, HoughCircles 입력)
-  //   3. circles (HoughCircles 출력)
-  // checkInputQuality 도 별도 cv.Mat 호출 — 그 외 4-5번째 위치
+  //   2. gray (median blur 적용, intensity stats 용)
+  //   3. coinDetectGray (Gaussian 15x15 추가 적용, HoughCircles 입력 — 속도 ↑)
+  //   4. circles (HoughCircles 출력)
+  // checkInputQuality 도 별도 cv.Mat 호출 — 그 외 5-6번째 위치
   const grayOriginalMat = makeMat({ rows: imgRows, cols: imgCols });
   let matCount = 0;
   const matInstances = [
     grayOriginalMat,
     grayMat,
+    grayMat, // coinDetectGray (blur 적용 후이지만 동일 차원 → grayMat 재사용 OK)
     circlesMat,
     makeMat(),
     makeMat(),
@@ -103,6 +107,7 @@ function setupCvMock(opts: {
     imread: vi.fn(() => srcMat),
     cvtColor: vi.fn(),
     medianBlur: vi.fn(),
+    GaussianBlur: vi.fn(),
     HoughCircles: vi.fn(),
     Laplacian: vi.fn(),
     meanStdDev: vi.fn(),
@@ -115,6 +120,9 @@ function setupCvMock(opts: {
     MatVector: vi.fn(function MockMatVecCtor() {
       const m = makeMat();
       return m;
+    }) as unknown as ReturnType<typeof vi.fn>,
+    Size: vi.fn(function MockSize(w: number, h: number) {
+      return { width: w, height: h };
     }) as unknown as ReturnType<typeof vi.fn>,
     COLOR_RGBA2GRAY: 0,
     HOUGH_GRADIENT: 0,

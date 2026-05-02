@@ -16,6 +16,12 @@ declare const cv: {
   imread: (canvas: HTMLCanvasElement | OffscreenCanvas) => CvMat;
   cvtColor: (src: CvMat, dst: CvMat, code: number) => void;
   medianBlur: (src: CvMat, dst: CvMat, ksize: number) => void;
+  GaussianBlur: (
+    src: CvMat,
+    dst: CvMat,
+    ksize: { width: number; height: number },
+    sigmaX: number,
+  ) => void;
   HoughCircles: (
     src: CvMat,
     circles: CvMat,
@@ -32,6 +38,7 @@ declare const cv: {
   mean: (src: CvMat) => number[];
   Mat: new (...args: unknown[]) => CvMat;
   MatVector: new (...args: unknown[]) => CvMat;
+  Size: new (width: number, height: number) => { width: number; height: number };
   COLOR_RGBA2GRAY: number;
   HOUGH_GRADIENT: number;
   CV_64F: number;
@@ -307,18 +314,22 @@ export async function detectCoin(
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     cv.medianBlur(gray, gray, 7);
 
-    // **ROI 최적화 시도 두 번 모두 정확도 회귀** — 되돌림 (2026-05-02).
-    // - v1 (절대 비례 파라미터): minR 작아져 phantom 우선 → 회귀
-    // - v2 (절대 픽셀 파라미터 + 필터 skip): hint 가까운 phantom 잘못 선택 → 회귀
-    // - v2.1 (ROI + 필터 복원): HoughCircles 자체가 ROI 경계 영향으로 다른
-    //   circle 검출 → 측정값 변동 (309 → 418μm 사용자 보고)
+    // **속도 최적화 (2026-05-02)**: HoughCircles 전용 입력에 강한 blur 추가.
+    // 미세한 coffee 입자 texture (espresso worst case 30s 의 주요 원인) 가
+    // Canny edge 폭증을 일으킴. coinDetect 는 큰 circle (동전, ~100-200px) 만
+    // 찾으면 되므로 small-scale texture suppress 해도 무관.
     //
-    // 결론: HoughCircles 는 입력 이미지 형태 (cropped vs full) 에 따라 결과가
-    // 결정적이지 않음. 정확도 우선 → 전체 이미지 처리 유지. 속도 UX 는
-    // indeterminate progress bar 로 대응.
+    // 측정용 (intensity stats / particle segment) 은 기존 gray 그대로 사용 —
+    // 이 Mat 은 detection 전용. 분쇄도 측정 정확도 영향 X.
+    //
+    // GaussianBlur 15x15 → coffee 입자 (1-3px) 완전 흐리게, 동전 (100-200px)
+    // 은 윤곽 보존.
+    const coinDetectGray = scope.track(new cv.Mat());
+    cv.GaussianBlur(gray, coinDetectGray, new cv.Size(15, 15), 0);
+
     const circles = scope.track(new cv.Mat());
     cv.HoughCircles(
-      gray,
+      coinDetectGray,
       circles,
       cv.HOUGH_GRADIENT,
       1, // dp
