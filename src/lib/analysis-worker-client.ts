@@ -27,10 +27,11 @@ export function runAnalysisInWorker(
   opts: RunOptions = {},
 ): AnalysisHandle {
   // Vite 의 ?worker import — 빌드 타임에 worker 번들로 분리.
-  // **Classic worker** (type 미지정) — module worker 는 importScripts 미지원이라
-  // OpenCV.js (UMD bundle, importScripts 로 로드) 와 호환 안 됨.
+  // **Module worker** (type:"module") — TypeScript ESM import 처리 가능.
+  // OpenCV.js (UMD) 는 worker 안에서 fetch + Function eval 로 로드.
   const worker = new Worker(
     new URL("../workers/analysis.worker.ts", import.meta.url),
+    { type: "module" },
   );
 
   let terminated = false;

@@ -43,15 +43,23 @@ declare const self: DedicatedWorkerGlobalScope & {
 
 let cvReady: Promise<void> | null = null;
 
-function ensureCvLoaded(): Promise<void> {
+async function ensureCvLoaded(): Promise<void> {
   if (cvReady) return cvReady;
-  cvReady = new Promise((resolve, reject) => {
-    try {
-      // Worker 에선 importScripts 로 동기 스크립트 로드. opencv.js 는
-      // self.Module 환경 변수를 통해 자동 초기화.
-      self.importScripts("/opencv.js");
-      const start = Date.now();
-      const TIMEOUT_MS = 30_000;
+  cvReady = (async () => {
+    // Module worker 는 importScripts 미지원 → fetch + Function eval 로 로드.
+    // opencv.js 는 UMD bundle 로, self/this 컨텍스트에서 실행 시 self.cv 에 자동 attach.
+    const response = await fetch("/opencv.js");
+    if (!response.ok) {
+      throw new Error(`worker opencv fetch fail: HTTP ${response.status}`);
+    }
+    const code = await response.text();
+    // new Function(...).call(self) — strict module scope 회피, self 를 this 로.
+    // opencv.js 의 module 변수 (UMD wrapper) 가 self 인식.
+    new Function(code).call(self);
+
+    const start = Date.now();
+    const TIMEOUT_MS = 30_000;
+    await new Promise<void>((resolve, reject) => {
       const tryReady = () => {
         const cv = self.cv;
         if (cv && typeof cv.Mat === "function") {
@@ -64,7 +72,6 @@ function ensureCvLoaded(): Promise<void> {
         }
         setTimeout(tryReady, 50);
       };
-      // onRuntimeInitialized 콜백 + polling 동시 사용
       if (self.cv) {
         const prev = self.cv.onRuntimeInitialized;
         self.cv.onRuntimeInitialized = () => {
@@ -73,10 +80,8 @@ function ensureCvLoaded(): Promise<void> {
         };
       }
       tryReady();
-    } catch (e) {
-      reject(e);
-    }
-  });
+    });
+  })();
   return cvReady;
 }
 
