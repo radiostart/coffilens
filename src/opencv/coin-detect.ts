@@ -376,95 +376,69 @@ export async function detectCoin(
     }
     sortedCircles.sort((a, b) => b.r - a.r);
 
-    type CoinCandidate = {
-      cx: number;
-      cy: number;
-      r: number;
-      mean: number;
-      stddev: number;
-      exterior: number;
-      rimGradient: number;
-    };
-    let selectedCandidate: CoinCandidate;
+    // 모든 후보의 intensity/exterior/rim gradient 계산 — hint 유무 관계없이
+    // 동일하게 검증 (정확도 우선). 사용자 보고: 필터 skip 시 phantom 가까이
+    // 있으면 잘못된 동전 선택 → 분쇄도 측정 1.3배 부풀림 회귀.
+    const annotated = sortedCircles.map((c) => {
+      const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
+      const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
+      const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
+      return { ...c, ...interior, exterior, rimGradient };
+    });
+    console.log(
+      "[coin-detect] all circles:",
+      annotated
+        .map(
+          (c) =>
+            `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) i=${c.mean.toFixed(0)}±${c.stddev.toFixed(0)} ext=${c.exterior.toFixed(0)} grad=${c.rimGradient.toFixed(0)}`,
+        )
+        .join(" | "),
+    );
 
+    const coinCandidates = annotated.filter((c) => {
+      if (c.mean < COIN_MIN_MEAN_INTENSITY) return false;
+      if (c.mean > COIN_MAX_MEAN_INTENSITY) return false;
+      if (c.stddev > COIN_MAX_STDDEV) return false;
+      if (
+        c.exterior !== 999 &&
+        c.rimGradient < COIN_GRADIENT_STRONG_BYPASS
+      ) {
+        const diff = Math.abs(c.mean - c.exterior);
+        if (diff > COIN_MAX_INTERIOR_EXTERIOR_DIFF) return false;
+      }
+      if (c.rimGradient < COIN_MIN_RIM_GRADIENT) return false;
+      return true;
+    });
+    console.log(
+      `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}], stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
+    );
+
+    if (coinCandidates.length === 0) {
+      throw { kind: "no_coin" } satisfies AnalysisError;
+    }
+
+    let selectedCandidate: (typeof coinCandidates)[number];
     if (coinHint) {
-      // **Simplified hint path (2026-05-02)**: 사용자가 동전 위치 명시했으므로
-      // intensity/exterior/gradient 필터 skip. HoughCircles 가 검출한 원 중
-      // hint 와 가장 가까운 것 선택 (사용자 권위 우선).
-      //
-      // 후보 logging 위해 stats 계산하지만 필터링엔 사용 X (디버그용).
+      // hint 있으면 필터 통과한 후보 중 가장 가까운 것 선택. multi_coin
+      // 검사 우회 (사용자가 "이 동전" 명시).
       const hintX = coinHint.x * gray.cols;
       const hintY = coinHint.y * gray.rows;
-      const sortedByDist = [...sortedCircles].sort((a, b) => {
+      const sortedByDist = [...coinCandidates].sort((a, b) => {
         const da = Math.hypot(a.cx - hintX, a.cy - hintY);
         const db = Math.hypot(b.cx - hintX, b.cy - hintY);
         return da - db;
       });
-      console.log(
-        `[coin-detect] hint candidates (sorted by dist):`,
-        sortedByDist
-          .map((c) => {
-            const dist = Math.hypot(c.cx - hintX, c.cy - hintY);
-            return `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) dist=${dist.toFixed(0)}`;
-          })
-          .join(" | "),
-      );
-      const picked = sortedByDist[0];
-      // 디버그용 intensity stats — 필터 skip 이므로 결과에만 기록.
-      const interior = intensityStatsInCircle(gray, picked.cx, picked.cy, picked.r);
-      const exterior = meanIntensityRingOutside(gray, picked.cx, picked.cy, picked.r);
-      const rimGradient = meanRimGradient(grayOriginal, picked.cx, picked.cy, picked.r);
-      selectedCandidate = { ...picked, ...interior, exterior, rimGradient };
+      selectedCandidate = sortedByDist[0];
       const dist = Math.hypot(
         selectedCandidate.cx - hintX,
         selectedCandidate.cy - hintY,
       );
       console.log(
         `[coin-detect] hint at (${hintX.toFixed(0)},${hintY.toFixed(0)}). ` +
-          `nearest candidate: r=${selectedCandidate.r.toFixed(1)} @(${selectedCandidate.cx.toFixed(0)},${selectedCandidate.cy.toFixed(0)}) dist=${dist.toFixed(0)}px ` +
-          `i=${selectedCandidate.mean.toFixed(0)}±${selectedCandidate.stddev.toFixed(0)} ext=${selectedCandidate.exterior.toFixed(0)} grad=${selectedCandidate.rimGradient.toFixed(0)}. ` +
-          `intensity 필터 skip (사용자 hint).`,
+          `nearest candidate: r=${selectedCandidate.r.toFixed(1)} @(${selectedCandidate.cx.toFixed(0)},${selectedCandidate.cy.toFixed(0)}) dist=${dist.toFixed(0)}px. ` +
+          `multi_coin 검사 우회.`,
       );
     } else {
-      // 자동 검출 분기 — hint 없을 때만 intensity/exterior/gradient 필터 적용.
-      const annotated = sortedCircles.map((c) => {
-        const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
-        const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
-        const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
-        return { ...c, ...interior, exterior, rimGradient };
-      });
-      console.log(
-        "[coin-detect] all circles:",
-        annotated
-          .map(
-            (c) =>
-              `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) i=${c.mean.toFixed(0)}±${c.stddev.toFixed(0)} ext=${c.exterior.toFixed(0)} grad=${c.rimGradient.toFixed(0)}`,
-          )
-          .join(" | "),
-      );
-
-      const coinCandidates = annotated.filter((c) => {
-        if (c.mean < COIN_MIN_MEAN_INTENSITY) return false;
-        if (c.mean > COIN_MAX_MEAN_INTENSITY) return false;
-        if (c.stddev > COIN_MAX_STDDEV) return false;
-        if (
-          c.exterior !== 999 &&
-          c.rimGradient < COIN_GRADIENT_STRONG_BYPASS
-        ) {
-          const diff = Math.abs(c.mean - c.exterior);
-          if (diff > COIN_MAX_INTERIOR_EXTERIOR_DIFF) return false;
-        }
-        if (c.rimGradient < COIN_MIN_RIM_GRADIENT) return false;
-        return true;
-      });
-      console.log(
-        `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}], stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
-      );
-
-      if (coinCandidates.length === 0) {
-        throw { kind: "no_coin" } satisfies AnalysisError;
-      }
-
       if (coinCandidates.length > 1) {
         // hint 없음 — 자동 검출 분기 (가장 큰 것 + concentric/separated 검사)
         const biggest = coinCandidates[0];
