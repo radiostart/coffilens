@@ -29,6 +29,24 @@ export interface RecordEntity {
    * 자체로는 v2 마이그레이션 불요. 단, 인덱스 필요해지면 v2. v1 에 미리 자리만 잡음.
    */
   grinderMemo?: string;
+  /**
+   * 2026-05-02 추가 — archive view 에서 히스토그램/추출 가이드 재현용.
+   * 모두 optional 로 schema 호환성 유지 (구 record 는 부분 표시).
+   *
+   * - diameters: 입자 직경 배열 (sieve-equivalent μm). 히스토그램 입력.
+   *   typical 600~3000개, 8 bytes/value → 5~25KB per record.
+   * - mmPerPixel: brewing-guide measurement confidence 라벨용.
+   * - clumpsCount/AreaRatio: 클럼프 caveat 표시용.
+   * - durationMs: 분석 시간 표시용.
+   */
+  diameters?: number[];
+  mmPerPixel?: number;
+  clumpsCount?: number;
+  clumpsAreaRatio?: number;
+  clumpsTotalAreaMm2?: number;
+  totalAreaMm2?: number;
+  particleCount?: number;
+  durationMs?: number;
 }
 
 export type RecordMeta = Omit<RecordEntity, "thumbnail">;

@@ -31,12 +31,18 @@ export function ResultRoute() {
   const result = useMeasurementStore((s) => s.result);
   const error = useMeasurementStore((s) => s.error);
   const frame = useMeasurementStore((s) => s.frame);
+  const archivedRecordId = useMeasurementStore((s) => s.archivedRecordId);
+  const setArchivedRecordId = useMeasurementStore((s) => s.setArchivedRecordId);
   const saveHistory = useHistoryStore((s) => s.save);
+  const removeHistory = useHistoryStore((s) => s.remove);
   const [, setLocation] = useLocation();
   const [saved, setSaved] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [cleanedCount, setCleanedCount] = useState(0);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // archive view: 저장된 기록 보기 모드. 측정 저장 CTA 숨기고 삭제 버튼 노출.
+  const isArchived = archivedRecordId !== null;
 
   // toast 자동 제거
   useEffect(() => {
@@ -146,6 +152,15 @@ export function ResultRoute() {
         finesPercent: result.stats.finesPercent,
         confidence: result.confidence.score,
         coinType: result.coin.coinType,
+        // 2026-05-02 추가 — archive view 에서 히스토그램/추출 가이드 재현용.
+        diameters: result.stats.diameters,
+        mmPerPixel: result.coin.mmPerPixel,
+        clumpsCount: result.stats.clumps.count,
+        clumpsAreaRatio: result.stats.clumps.areaRatio,
+        clumpsTotalAreaMm2: result.stats.clumps.totalAreaMm2,
+        totalAreaMm2: result.stats.totalAreaMm2,
+        particleCount: result.stats.particleCount,
+        durationMs: result.durationMs,
       });
       setCleanedCount(cleaned);
       setSaved(true);
@@ -182,18 +197,25 @@ export function ResultRoute() {
           }
         />
 
-        {/* 2차 히스토그램 */}
+        {/* 2차 히스토그램 — archive view 에서 구 record 는 diameters[] 없음 */}
         <section
           className="result-histogram-section"
           aria-label="입자 분포"
         >
           <h2 className="text-h3 result-section-title">입자 분포</h2>
-          <Histogram
-            diameters={result.stats.diameters}
-            d10={result.stats.d10}
-            d50={result.stats.d50}
-            d90={result.stats.d90}
-          />
+          {result.stats.diameters.length > 0 ? (
+            <Histogram
+              diameters={result.stats.diameters}
+              d10={result.stats.d10}
+              d50={result.stats.d50}
+              d90={result.stats.d90}
+            />
+          ) : (
+            <p className="text-caption result-histogram-empty">
+              이전 버전 기록은 분포 그래프가 저장되지 않았어요. 새 측정부터
+              표시됩니다.
+            </p>
+          )}
         </section>
 
         {/* 3차 inline data list — 작은쪽 → 중앙 → 큰쪽 progression 으로 정렬,
@@ -342,7 +364,46 @@ export function ResultRoute() {
             저장 실패: {saveError}
           </p>
         )}
-        {!saved ? (
+        {isArchived ? (
+          /* Archive view — 저장된 기록 보기. 저장 CTA 숨김, 삭제 버튼 노출. */
+          <>
+            <button
+              type="button"
+              className="btn-primary result-save-cta"
+              onClick={() => setLocation("/coin-select")}
+            >
+              새 측정 시작
+            </button>
+            <button
+              type="button"
+              className={`result-secondary${confirmDelete ? " result-delete-confirm" : ""}`}
+              onClick={async () => {
+                if (!confirmDelete) {
+                  setConfirmDelete(true);
+                  setTimeout(() => setConfirmDelete(false), 5000);
+                  return;
+                }
+                if (archivedRecordId) {
+                  await removeHistory(archivedRecordId);
+                  setArchivedRecordId(null);
+                  setLocation("/home");
+                }
+              }}
+            >
+              {confirmDelete ? "정말 삭제할까요? (다시 탭)" : "이 기록 삭제"}
+            </button>
+            <button
+              type="button"
+              className="result-secondary"
+              onClick={() => {
+                setArchivedRecordId(null);
+                setLocation("/home");
+              }}
+            >
+              홈으로
+            </button>
+          </>
+        ) : !saved ? (
           <>
             <button
               type="button"

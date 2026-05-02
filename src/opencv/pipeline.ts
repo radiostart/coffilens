@@ -79,24 +79,29 @@ export async function runPipeline(
     );
   }
 
+  // **progress UX 패턴**: onProgress(setState) 직후 tick() 으로 yield → React
+  // 가 화면 업데이트할 시간 확보 → 실제 무거운 동기 작업 (detectCoin 등 WASM
+  // call) 실행. 이 패턴 없이 setState 후 즉시 동기 호출하면 main thread 블록
+  // 으로 progress bar 가 이전 단계에 멈춰 있는 것처럼 보임 (사용자 보고 2026-05-02).
   signal.throwIfAborted();
   callbacks.onProgress?.("downsample", 0);
+  await tick();
   const canvas = await step("downsample", () => downsampleImage(source));
   console.log(`[pipeline] downsampled canvas: ${canvas.width}×${canvas.height}`);
-  await tick();
 
   signal.throwIfAborted();
   callbacks.onProgress?.("preflight", 15);
-  const inputQuality = await step("preflight", () => checkInputQuality(canvas));
   await tick();
+  const inputQuality = await step("preflight", () => checkInputQuality(canvas));
 
   signal.throwIfAborted();
   callbacks.onProgress?.("coin", 30);
-  const coin = await step("coin", () => detectCoin(canvas, coinType, coinHint));
   await tick();
+  const coin = await step("coin", () => detectCoin(canvas, coinType, coinHint));
 
   signal.throwIfAborted();
   callbacks.onProgress?.("segment", 50);
+  await tick();
   const segmentation = await step("segment", () =>
     segmentParticles(canvas, coin),
   );
@@ -105,6 +110,7 @@ export async function runPipeline(
     // sweep Issue 17: segmentParticles 반환 직후 abort 재확인 (watershed 후)
     signal.throwIfAborted();
     callbacks.onProgress?.("stats", 80);
+    await tick();
 
     let stats: ParticleStats;
     try {
@@ -122,6 +128,7 @@ export async function runPipeline(
 
     signal.throwIfAborted();
     callbacks.onProgress?.("confidence", 95);
+    await tick();
     const confidence = computeConfidence({
       coinConfidence: coin.confidence,
       particleCount: stats.particleCount,

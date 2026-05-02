@@ -26,11 +26,18 @@ interface MeasurementState {
   result: PipelineResult | null;
   /** 분석 실패 시 — F07 에러 화면 입력 */
   error: AnalysisError | null;
+  /**
+   * Archived view mode — IndexedDB 에서 로드된 과거 기록.
+   * true 시 result.tsx 가 "측정 저장" CTA 숨기고 "삭제" 버튼 표시.
+   * 2026-05-02 추가.
+   */
+  archivedRecordId: string | null;
   setCoinType: (c: CoinType) => void;
   setFrame: (canvas: HTMLCanvasElement | null) => void;
   setCoinHint: (h: CoinHint | null) => void;
   setResult: (r: PipelineResult | null) => void;
   setError: (e: AnalysisError | null) => void;
+  setArchivedRecordId: (id: string | null) => void;
   reset: () => void;
 }
 
@@ -40,11 +47,13 @@ export const useMeasurementStore = create<MeasurementState>((set) => ({
   coinHint: null,
   result: null,
   error: null,
+  archivedRecordId: null,
   setCoinType: (c) => set({ coinType: c }),
   setFrame: (canvas) => set({ frame: canvas }),
   setCoinHint: (h) => set({ coinHint: h }),
   setResult: (r) => set({ result: r, error: null }),
   setError: (e) => set({ error: e, result: null }),
+  setArchivedRecordId: (id) => set({ archivedRecordId: id }),
   reset: () =>
     set({
       coinType: null,
@@ -52,5 +61,6 @@ export const useMeasurementStore = create<MeasurementState>((set) => ({
       coinHint: null,
       result: null,
       error: null,
+      archivedRecordId: null,
     }),
 }));

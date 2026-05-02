@@ -106,6 +106,68 @@ export async function getThumbnail(id: string): Promise<Blob | null> {
   });
 }
 
+/**
+ * 저장된 RecordEntity → PipelineResult-like 변환.
+ *
+ * archive view (홈에서 과거 기록 클릭) 시 result.tsx 가 그대로 사용 가능하도록
+ * 모양을 맞춤. 구 record (diameters/mmPerPixel 미저장) 는 fallback 으로 빈 배열
+ * + 0 채움 — UI 가 부분 표시.
+ */
+export function recordToPipelineResult(
+  r: RecordEntity,
+): import("../opencv/pipeline").PipelineResult {
+  const coinDiameterMm = r.coinType === "500" ? 26.5 : 24;
+  const mmPerPixel = r.mmPerPixel ?? 0; // 구 record fallback (0 → confidence 'low')
+  const radiusPx = mmPerPixel > 0 ? coinDiameterMm / 2 / mmPerPixel : 0;
+  return {
+    stats: {
+      d10: r.d10,
+      d50: r.d50,
+      d90: r.d90,
+      uniformity: r.uniformity,
+      finesPercent: r.finesPercent,
+      particleCount: r.particleCount ?? 0,
+      totalAreaMm2: r.totalAreaMm2 ?? 0,
+      diameters: r.diameters ?? [], // 빈 배열 → 히스토그램 비어있게 렌더
+      clumps: {
+        count: r.clumpsCount ?? 0,
+        totalAreaMm2: r.clumpsTotalAreaMm2 ?? 0,
+        areaRatio: r.clumpsAreaRatio ?? 0,
+      },
+    },
+    coin: {
+      centerX: 0,
+      centerY: 0,
+      radiusPx,
+      coinType: r.coinType,
+      diameterMm: coinDiameterMm,
+      mmPerPixel,
+      confidence: r.confidence / 10, // score 0~10 → 0~1
+    },
+    confidence: {
+      score: r.confidence,
+      signals: { coin: 0, particles: 0, brightness: 0, blur: 0 }, // 구체 신호 미저장
+      warning: false,
+    },
+    durationMs: r.durationMs ?? 0,
+  };
+}
+
+/** 단일 record full load — archive view 진입 시 호출 (diameters[] 포함) */
+export async function getRecord(id: string): Promise<RecordEntity | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_RECORDS, "readonly");
+    const req = tx.objectStore(STORE_RECORDS).get(id);
+    req.onsuccess = () => {
+      const value = req.result as RecordEntity | undefined;
+      resolve(value ?? null);
+    };
+    req.onerror = () =>
+      reject(req.error ?? new Error("getRecord failed"));
+  });
+}
+
 export async function deleteRecord(id: string): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {

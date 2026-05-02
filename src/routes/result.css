@@ -163,6 +163,16 @@
   align-self: center;
 }
 
+/* archive view 의 삭제 확인 단계 — 빨간색 강조 */
+.result-delete-confirm {
+  background: var(--color-error, #b04545);
+  color: var(--color-text-on-primary, #ffffff);
+  text-decoration: none;
+  border-radius: var(--radius-md);
+  font-weight: 700;
+  padding: var(--space-sm) var(--space-md);
+}
+
 .result-error,
 .result-empty {
   padding: var(--space-2xl) var(--space-md);
