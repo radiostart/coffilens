@@ -349,17 +349,20 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
   // bin 수 늘려도 trend 선이 너무 거칠어지지 않도록 비례 적용.
   // 최소 2, 최대 5 (단봉 평탄화는 너무 큰 window, 거침은 너무 작은 window).
   const halfWindow = Math.max(2, Math.min(5, Math.round(counts.length * 0.1)));
+  // **Statistical noise 임계** (2026-05-02): bin 수 대비 <5% 면 noise 로 간주.
+  // 빈 bin (0) + 매우 낮은 count (1-2개) 까지 trend 평균에서 제외.
+  // 사용자 보고: "여전히 0인 영역 포함" → count=0 만 skip 으론 부족, 통계적으로
+  // 무의미한 low-count bin 도 dip 유발. log-normal 분포의 매끄러운 descending
+  // 패턴 보장.
+  const maxCount = Math.max(...counts);
+  const noiseThreshold = Math.max(1, Math.floor(maxCount * 0.05));
   const trend = counts.map((_, i) => {
     const start = Math.max(0, i - halfWindow);
     const end = Math.min(counts.length, i + halfWindow + 1);
     const slice = counts.slice(start, end);
-    // **Zero-count bin 제외** (2026-05-02 사용자 보고): 빈 bin (0개) 까지
-    // 평균에 포함하면 trend 선이 0 으로 끌어내려져 진짜 분포 모양 왜곡.
-    // 데이터 있는 bin 만 평균 — log-normal 분포 (fines 많음 → 중앙 → 큰쪽 적음)
-    // 의 자연스러운 descending 패턴 가시화.
-    const nonZero = slice.filter((c) => c > 0);
-    if (nonZero.length === 0) return 0;
-    return nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
+    const meaningful = slice.filter((c) => c >= noiseThreshold);
+    if (meaningful.length === 0) return 0;
+    return meaningful.reduce((a, b) => a + b, 0) / meaningful.length;
   });
 
   return counts.map((count, i) => ({
