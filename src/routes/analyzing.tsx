@@ -198,7 +198,15 @@ export function AnalyzingRoute() {
             <p className="text-body-large analyzing-description">
               {STEP_LABELS[state.step]}
             </p>
-            <ProgressBar value={state.progress} />
+            {/*
+             * coin 단계는 HoughCircles 가 monolithic WASM 호출 (수백ms~수초) 라
+             * 중간 progress 보고 불가 → indeterminate (실제 진행률 표시 못 하므로
+             * 정직한 슬라이딩 바). 다른 단계는 빠르거나 progress 보고됨.
+             */}
+            <ProgressBar
+              value={state.progress}
+              indeterminate={state.step === "coin"}
+            />
           </>
         )}
 
@@ -232,8 +240,33 @@ export function AnalyzingRoute() {
   );
 }
 
-function ProgressBar({ value }: { value: number }) {
+function ProgressBar({
+  value,
+  indeterminate = false,
+}: {
+  value: number;
+  indeterminate?: boolean;
+}) {
   const pct = Math.max(2, Math.min(100, value * 100));
+
+  // Indeterminate: 실제 progress 알 수 없는 단계 (HoughCircles 등 monolithic
+  // WASM 호출). 슬라이딩 애니메이션으로 "작업 중" 표현. % 라벨 대신 dots.
+  if (indeterminate) {
+    return (
+      <>
+        <div
+          className="analyzing-progress"
+          role="progressbar"
+          aria-busy="true"
+          aria-valuetext="처리 중 (시간 예측 불가)"
+        >
+          <div className="analyzing-progress-bar analyzing-progress-bar-indeterminate" />
+        </div>
+        <p className="text-caption analyzing-progress-text">잠시만 기다려주세요</p>
+      </>
+    );
+  }
+
   return (
     <>
       <div

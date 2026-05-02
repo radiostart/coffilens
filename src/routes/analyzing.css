@@ -36,6 +36,27 @@
   transition: width 400ms var(--ease-inout);
 }
 
+/*
+ * Indeterminate progress (coin detection 등 progress 산출 불가 단계).
+ * 좌→우 슬라이딩 애니메이션 — 실제 진행률 모르므로 "작업 중" 만 표현.
+ * width 30% 의 bar 가 -30% → 130% 위치로 무한 반복.
+ */
+.analyzing-progress-bar-indeterminate {
+  width: 30%;
+  animation: analyzing-progress-slide 1200ms var(--ease-inout) infinite;
+  /* width transition 비활성화 (정해진 width 유지) */
+  transition: none;
+}
+
+@keyframes analyzing-progress-slide {
+  0% {
+    margin-left: -30%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+
 .analyzing-progress-text {
   color: var(--color-text-secondary);
 }
