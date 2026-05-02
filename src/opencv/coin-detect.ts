@@ -307,55 +307,26 @@ export async function detectCoin(
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     cv.medianBlur(gray, gray, 7);
 
-    // **ROI 최적화 v2 (2026-05-02 재시도)**: hint 있을 때만 hint 주변 search.
+    // **ROI 최적화 시도 두 번 모두 정확도 회귀** — 되돌림 (2026-05-02).
+    // - v1 (절대 비례 파라미터): minR 작아져 phantom 우선 → 회귀
+    // - v2 (절대 픽셀 파라미터 + 필터 skip): hint 가까운 phantom 잘못 선택 → 회귀
+    // - v2.1 (ROI + 필터 복원): HoughCircles 자체가 ROI 경계 영향으로 다른
+    //   circle 검출 → 측정값 변동 (309 → 418μm 사용자 보고)
     //
-    // 이전 v1 실패 원인: HoughCircles 파라미터 (minDist/minR/maxR) 를 ROI 차원
-    // 비례로 계산해 ROI 작아질수록 작은 phantom circle 도 valid 후보가 됨 →
-    // 잘못된 coin 검출. (사용자 보고: D50 309 → 709 회귀)
-    //
-    // v2 수정: ROI 는 search 범위만 줄이고, 파라미터는 **전체 이미지 차원
-    // 기준 절대값 유지** → "유효 동전" 정의 변경 X. 정확도 보존하며 속도 ↑.
-    //
-    // 추가 단순화: hint 있으면 사용자가 동전 위치 명시했으므로 intensity/exterior/
-    // gradient 필터 skip (사용자 권위 우선). 합리적 크기 (r 50~maxR) 만 검사.
-    //
-    // 반환된 원의 좌표는 ROI offset 더해 원본 이미지 좌표로 변환.
+    // 결론: HoughCircles 는 입력 이미지 형태 (cropped vs full) 에 따라 결과가
+    // 결정적이지 않음. 정확도 우선 → 전체 이미지 처리 유지. 속도 UX 는
+    // indeterminate progress bar 로 대응.
     const circles = scope.track(new cv.Mat());
-    let roiOffsetX = 0;
-    let roiOffsetY = 0;
-    let houghInput = gray;
-    if (coinHint) {
-      const hintX = Math.round(coinHint.x * gray.cols);
-      const hintY = Math.round(coinHint.y * gray.rows);
-      // ROI 반쪽 size = rows × 35% = ~448px (1280 기준). 일반적 동전 직경
-      // (~150px) 의 6배 buffer → 사용자 탭이 동전 가운데서 벗어나도 안전.
-      const halfSize = Math.round(gray.rows * 0.35);
-      const x0 = Math.max(0, hintX - halfSize);
-      const y0 = Math.max(0, hintY - halfSize);
-      const x1 = Math.min(gray.cols, hintX + halfSize);
-      const y1 = Math.min(gray.rows, hintY + halfSize);
-      const rect = new cv.Rect(x0, y0, x1 - x0, y1 - y0);
-      const cropped = scope.track(gray.roi(rect));
-      houghInput = cropped;
-      roiOffsetX = x0;
-      roiOffsetY = y0;
-      console.log(
-        `[coin-detect] hint ROI: (${x0},${y0}) ${x1 - x0}×${y1 - y0} (full ${gray.cols}×${gray.rows})`,
-      );
-    }
-
-    // 파라미터는 ROI 와 무관하게 **전체 이미지 (gray) 차원 기준 절대값**.
-    // ROI 가 작아도 동일한 minDist/minR/maxR 적용 → 정확도 보존.
     cv.HoughCircles(
-      houghInput,
+      gray,
       circles,
       cv.HOUGH_GRADIENT,
       1, // dp
-      gray.rows / 3, // minDist (전체 차원 기준 절대값)
+      gray.rows / 3, // minDist
       100, // param1 (Canny 상위 임계)
       50, // param2 (검출 임계)
-      Math.round(gray.rows * 0.05), // minRadius (전체 차원 5%)
-      Math.round(gray.rows * 0.4), // maxRadius (전체 차원 40%)
+      Math.round(gray.rows * 0.05), // minRadius (이미지 5%)
+      Math.round(gray.rows * 0.4), // maxRadius (이미지 40%)
     );
 
     const numCircles = circles.cols;
@@ -365,12 +336,11 @@ export async function detectCoin(
     }
 
     // 검출된 원들을 radius 내림차순 정렬 (data32F: [cx0, cy0, r0, cx1, cy1, r1, ...])
-    // ROI 사용 시 좌표를 원본 이미지 좌표계로 변환 (offset 더함).
     const sortedCircles: Array<{ cx: number; cy: number; r: number }> = [];
     for (let i = 0; i < numCircles; i++) {
       sortedCircles.push({
-        cx: circles.data32F[i * 3] + roiOffsetX,
-        cy: circles.data32F[i * 3 + 1] + roiOffsetY,
+        cx: circles.data32F[i * 3],
+        cy: circles.data32F[i * 3 + 1],
         r: circles.data32F[i * 3 + 2],
       });
     }
