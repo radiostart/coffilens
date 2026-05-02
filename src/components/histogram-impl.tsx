@@ -345,9 +345,10 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     ranges.push(Math.round(lo));
   }
 
-  // Moving average — bin 수의 ~5% 양쪽 (40 bin → ±2). bin 수 늘려도 trend
-  // 선이 너무 거칠어지지 않도록 비례 적용. 최소 1, 최대 4 (지나친 oversmooth 방지).
-  const halfWindow = Math.max(1, Math.min(4, Math.round(counts.length * 0.05)));
+  // Moving average — bin 수의 ~10% 양쪽 (25 bin → ±2~3, 40 bin → ±4).
+  // bin 수 늘려도 trend 선이 너무 거칠어지지 않도록 비례 적용.
+  // 최소 2, 최대 5 (단봉 평탄화는 너무 큰 window, 거침은 너무 작은 window).
+  const halfWindow = Math.max(2, Math.min(5, Math.round(counts.length * 0.1)));
   const trend = counts.map((_, i) => {
     const start = Math.max(0, i - halfWindow);
     const end = Math.min(counts.length, i + halfWindow + 1);
