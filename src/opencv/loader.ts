@@ -14,13 +14,19 @@ declare global {
   }
 }
 
-const CDN_MIRRORS = [
-  "https://docs.opencv.org/4.10.0/opencv.js",
-  "https://cdn.jsdelivr.net/gh/opencv/opencv@4.10.0/opencv.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.10.0/opencv.js",
-];
+// OpenCV.js 는 자체 도메인에서만 서빙 (외부 CDN 0개).
+//   - 소스: @techstark/opencv-js npm 의존성
+//   - 동기화: scripts/sync-opencv.ts (postinstall/predev/prebuild hook)
+//   - 위치: public/opencv.js → dev=granite, prod=토스 CDN 통합 배포
+//
+// 변수명은 호환성 유지 (CDN_MIRRORS) — 의미는 "URL 후보".
+// 외부 CDN 의존성 제거 사유:
+//   1. 사용자 환경에서 docs.opencv.org 8MB 다운로드 stall 재현
+//   2. F00 capability matrix "외부 통신 사유" 검수 항목 자동 N/A
+//   3. 오프라인/네트워크 변동에도 robust
+const CDN_MIRRORS = ["/opencv.js"];
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 1; // 자체 서빙 실패 시 retry 의미 없음
 const RUNTIME_TIMEOUT_MS = 30_000;
 
 let loadPromise: Promise<void> | null = null;
@@ -49,7 +55,16 @@ export class OpenCVLoadError extends Error {
  * `loadOpenCV() === loadOpenCV()` 가 false 가 됨. 그래서 일반 함수로 IIFE 반환.
  */
 export function loadOpenCV(opts: LoaderOptions = {}): Promise<void> {
-  if (loadPromise) return loadPromise;
+  // 이미 완전히 로드됨 — 즉시 resolve.
+  if (isCvReady()) {
+    console.log("[loader] cv already ready, instant resolve");
+    return Promise.resolve();
+  }
+  if (loadPromise) {
+    console.log("[loader] reusing existing promise");
+    return loadPromise;
+  }
+  console.log("[loader] starting fresh, mirrors:", CDN_MIRRORS);
 
   loadPromise = (async () => {
     let lastErr: unknown;
@@ -58,17 +73,24 @@ export function loadOpenCV(opts: LoaderOptions = {}): Promise<void> {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       // 미러 순회 — 매 attempt 마다 다음 미러로
       const mirror = CDN_MIRRORS[attempt % CDN_MIRRORS.length];
+      console.log(`[loader] attempt ${attempt + 1}/${MAX_RETRIES} url=${mirror}`);
       try {
         opts.signal?.throwIfAborted();
         await fetchAndInject(mirror, opts.onProgress, opts.signal);
+        console.log(`[loader] fetch+inject done for ${mirror}`);
         await waitForRuntime(opts.signal);
+        console.log("[loader] runtime ready");
         return;
       } catch (e) {
+        console.warn(`[loader] attempt ${attempt + 1} failed`, e);
         lastErr = e;
         lastCause = classifyCause(e);
 
         if (e instanceof DOMException && e.name === "AbortError") {
-          throw e; // 사용자 cancel — 재시도 없이 즉시 throw
+          // 사용자 cancel (또는 StrictMode dev cleanup) — 즉시 throw.
+          // loadPromise 리셋해야 다음 호출이 새 promise 로 재시도 가능.
+          loadPromise = null;
+          throw e;
         }
 
         // 지수 backoff — abort signal 으로 일찍 깨움
@@ -138,13 +160,23 @@ function injectScript(src: string): Promise<void> {
   });
 }
 
+/**
+ * 실제 ready 여부 — WASM 초기화 완료 시점에 cv.Mat 이 constructor 로 붙음.
+ * window.cv 객체가 존재해도 config 키 (wasmBinaryFile, locateFile 등) 만 있는
+ * 상태라면 cv.Mat 은 아직 undefined. 이 체크가 진짜 신호.
+ */
+function isCvReady(): boolean {
+  if (typeof window === "undefined") return false;
+  const cv = window.cv as { Mat?: unknown } | undefined;
+  return !!cv && typeof cv.Mat === "function";
+}
+
 async function waitForRuntime(signal?: AbortSignal): Promise<void> {
   if (typeof window === "undefined") {
     throw new Error("window unavailable (non-browser env)");
   }
 
-  // 이미 초기화 완료
-  if (window.cv && Object.keys(window.cv).length > 1) return;
+  if (isCvReady()) return;
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -160,25 +192,37 @@ async function waitForRuntime(signal?: AbortSignal): Promise<void> {
       { once: true },
     );
 
-    if (window.cv) {
-      window.cv.onRuntimeInitialized = () => {
+    // 두 신호로 ready 감지:
+    //  1. cv.onRuntimeInitialized 콜백 (정식 진입점)
+    //  2. cv.Mat constructor 폴링 (콜백 미발화 케이스 대비, 50ms 간격)
+    function tryResolve() {
+      if (isCvReady()) {
         clearTimeout(timeout);
+        clearInterval(poll);
         resolve();
-      };
+        return true;
+      }
+      return false;
+    }
+
+    const poll = setInterval(tryResolve, 50);
+    signal?.addEventListener("abort", () => clearInterval(poll), {
+      once: true,
+    });
+
+    function attachCallback() {
+      if (window.cv) {
+        const prev = window.cv.onRuntimeInitialized;
+        window.cv.onRuntimeInitialized = () => {
+          if (typeof prev === "function") prev();
+          tryResolve();
+        };
+      }
+    }
+    if (window.cv) {
+      attachCallback();
     } else {
-      // 스크립트가 cv 를 늦게 노출하는 경우 — 폴링
-      const poll = setInterval(() => {
-        if (window.cv) {
-          clearInterval(poll);
-          window.cv.onRuntimeInitialized = () => {
-            clearTimeout(timeout);
-            resolve();
-          };
-        }
-      }, 50);
-      signal?.addEventListener("abort", () => clearInterval(poll), {
-        once: true,
-      });
+      // window.cv 자체가 아직 없음 — 폴링이 잡아줌
     }
   });
 }

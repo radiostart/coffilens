@@ -10,9 +10,19 @@ const HistogramImpl = lazy(() => import("./histogram-impl"));
 interface HistogramProps {
   diameters: number[];
   bins?: number;
+  /** D10/D50/D90 (μm) — CDF 곡선 위 reference 점으로 표시. 미지정 시 표시 X */
+  d10?: number;
+  d50?: number;
+  d90?: number;
 }
 
-export function Histogram({ diameters, bins = 20 }: HistogramProps) {
+export function Histogram({
+  diameters,
+  bins = 20,
+  d10,
+  d50,
+  d90,
+}: HistogramProps) {
   return (
     <Suspense
       fallback={
@@ -31,7 +41,13 @@ export function Histogram({ diameters, bins = 20 }: HistogramProps) {
         </div>
       }
     >
-      <HistogramImpl diameters={diameters} bins={bins} />
+      <HistogramImpl
+        diameters={diameters}
+        bins={bins}
+        d10={d10}
+        d50={d50}
+        d90={d90}
+      />
     </Suspense>
   );
 }

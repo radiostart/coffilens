@@ -28,7 +28,6 @@ export async function saveRecord(input: SaveInput): Promise<RecordEntity> {
   const full: RecordEntity = {
     id: input.id ?? generateId(),
     timestamp: input.timestamp ?? Date.now(),
-    tool: input.tool,
     thumbnail: input.thumbnail,
     d50: input.d50,
     d10: input.d10,
@@ -72,7 +71,6 @@ export async function listRecordsMeta(): Promise<RecordMeta[]> {
         const meta: RecordMeta = {
           id: value.id,
           timestamp: value.timestamp,
-          tool: value.tool,
           d50: value.d50,
           d10: value.d10,
           d90: value.d90,

@@ -6,18 +6,18 @@ describe("measurement.store", () => {
     useMeasurementStore.getState().reset();
   });
 
-  it("초기값 tool 은 null", () => {
-    expect(useMeasurementStore.getState().tool).toBeNull();
+  it("초기값 coinType 은 null", () => {
+    expect(useMeasurementStore.getState().coinType).toBeNull();
   });
 
-  it("setTool 호출 시 tool 업데이트", () => {
-    useMeasurementStore.getState().setTool("v60");
-    expect(useMeasurementStore.getState().tool).toBe("v60");
+  it("setCoinType 호출 시 coinType 업데이트", () => {
+    useMeasurementStore.getState().setCoinType("100");
+    expect(useMeasurementStore.getState().coinType).toBe("100");
   });
 
-  it("reset 호출 시 tool null 로 복귀", () => {
-    useMeasurementStore.getState().setTool("kalita");
+  it("reset 호출 시 coinType null 로 복귀", () => {
+    useMeasurementStore.getState().setCoinType("500");
     useMeasurementStore.getState().reset();
-    expect(useMeasurementStore.getState().tool).toBeNull();
+    expect(useMeasurementStore.getState().coinType).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ import { detectCoin, _internal } from "../../src/opencv/coin-detect";
 interface MockMat {
   rows: number;
   cols: number;
+  data: Uint8Array;
   data32F: Float32Array;
   data64F: Float64Array;
   delete: ReturnType<typeof vi.fn>;
@@ -31,9 +32,23 @@ interface MockCv {
 }
 
 function makeMat(opts: Partial<MockMat> = {}): MockMat {
+  const rows = opts.rows ?? 1280;
+  const cols = opts.cols ?? 720;
+  // 기본 grayscale: 150 ± 약한 변화 (gradient 측정 가능). intensityStatsInCircle
+  // 평균 ~150, stddev 작음 → mean+stddev 필터 통과. meanRimGradient 도 0 보다
+  // 큰 값 (~10-30) 으로 측정 → 동전 검출 분기 테스트 정상 진행.
+  // 특정 테스트가 다른 분포 필요시 override.
+  // 3px 가로 stripes 130/170 alternating (mean ~150, stddev ~20 → 통계 필터 통과,
+  // 인접 픽셀 ±2 차이 40 → meanRimGradient 평균 ≥ 18 통과)
+  const data =
+    opts.data ??
+    new Uint8Array(rows * cols).map((_, i) =>
+      Math.floor((i % cols) / 3) % 2 === 0 ? 130 : 170,
+    );
   return {
-    rows: opts.rows ?? 1280,
-    cols: opts.cols ?? 720,
+    rows,
+    cols,
+    data,
     data32F: opts.data32F ?? new Float32Array(0),
     data64F: opts.data64F ?? new Float64Array(0),
     delete: vi.fn(),
@@ -68,8 +83,21 @@ function setupCvMock(opts: {
     data64F: new Float64Array([opts.stddev ?? 100]),
   });
 
+  // detectCoin 의 new cv.Mat() 순서 (2026-05-02 변경 후):
+  //   1. grayOriginal (sharp edge 보존, gradient 측정용)
+  //   2. gray (blur 적용, HoughCircles 입력)
+  //   3. circles (HoughCircles 출력)
+  // checkInputQuality 도 별도 cv.Mat 호출 — 그 외 4-5번째 위치
+  const grayOriginalMat = makeMat({ rows: imgRows, cols: imgCols });
   let matCount = 0;
-  const matInstances = [grayMat, circlesMat, makeMat(), makeMat(), stddevMat];
+  const matInstances = [
+    grayOriginalMat,
+    grayMat,
+    circlesMat,
+    makeMat(),
+    makeMat(),
+    stddevMat,
+  ];
 
   const cv: MockCv = {
     imread: vi.fn(() => srcMat),
@@ -111,7 +139,7 @@ beforeEach(() => {
 describe("detectCoin — 분기 동작", () => {
   it("0개 검출 → no_coin", async () => {
     setupCvMock({ circles: [] });
-    await expect(detectCoin(fakeCanvas())).rejects.toMatchObject({
+    await expect(detectCoin(fakeCanvas(), "500")).rejects.toMatchObject({
       kind: "no_coin",
     });
   });
@@ -120,7 +148,7 @@ describe("detectCoin — 분기 동작", () => {
     setupCvMock({
       circles: [200, 600, 80, 500, 600, 80],
     });
-    await expect(detectCoin(fakeCanvas())).rejects.toMatchObject({
+    await expect(detectCoin(fakeCanvas(), "500")).rejects.toMatchObject({
       kind: "multi_coin",
       count: 2,
     });
@@ -130,7 +158,7 @@ describe("detectCoin — 분기 동작", () => {
     setupCvMock({
       circles: [200, 600, 80, 400, 600, 80, 600, 600, 80],
     });
-    await expect(detectCoin(fakeCanvas())).rejects.toMatchObject({
+    await expect(detectCoin(fakeCanvas(), "500")).rejects.toMatchObject({
       kind: "multi_coin",
       count: 3,
     });
@@ -139,7 +167,7 @@ describe("detectCoin — 분기 동작", () => {
   it("동전이 좌측 가장자리 잘림 → partial_coin", async () => {
     // cx=10, r=80 → cx - r = -70 < EDGE_MARGIN_PX (20)
     setupCvMock({ circles: [10, 600, 80] });
-    await expect(detectCoin(fakeCanvas())).rejects.toMatchObject({
+    await expect(detectCoin(fakeCanvas(), "500")).rejects.toMatchObject({
       kind: "partial_coin",
     });
   });
@@ -148,7 +176,7 @@ describe("detectCoin — 분기 동작", () => {
     // imgRows = 1280, imgCols = 720, 동전 중심 360,640 r=80
     // 가장자리 마진 20px 안 — 정상
     setupCvMock({ circles: [360, 640, 80], imgRows: 1280, imgCols: 720 });
-    const result = await detectCoin(fakeCanvas());
+    const result = await detectCoin(fakeCanvas(), "500");
 
     expect(result.centerX).toBe(360);
     expect(result.centerY).toBe(640);
@@ -158,28 +186,6 @@ describe("detectCoin — 분기 동작", () => {
     // mm/pixel 합리 범위 (0.05 ~ 0.2)
     expect(result.mmPerPixel).toBeGreaterThan(0.05);
     expect(result.mmPerPixel).toBeLessThan(0.3);
-  });
-});
-
-describe("chooseCoinType — 분류 휴리스틱", () => {
-  it("작은 동전 비율 → 100원", () => {
-    // ratio = 80*2 / 720 = 0.22 — 임계 0.2 초과 → 500원
-    expect(_internal.chooseCoinType(80, 720)).toBe("500");
-  });
-
-  it("매우 작은 비율 → 100원", () => {
-    // ratio = 50*2 / 720 ≈ 0.139 → 100원
-    expect(_internal.chooseCoinType(50, 720)).toBe("100");
-  });
-
-  it("큰 동전 비율 → 500원", () => {
-    // ratio = 100*2 / 720 ≈ 0.278 → 500원
-    expect(_internal.chooseCoinType(100, 720)).toBe("500");
-  });
-
-  it("경계값 ratio = 0.2 정확히 → 100원 (>0.2 만 500)", () => {
-    // 2r/w = 0.2 → r = 72, w = 720
-    expect(_internal.chooseCoinType(72, 720)).toBe("100");
   });
 });
 

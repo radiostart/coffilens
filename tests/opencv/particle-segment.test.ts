@@ -62,17 +62,19 @@ function setupCvMock(opts: CvMockOpts = {}) {
     }),
     cvtColor: vi.fn(),
     adaptiveThreshold: vi.fn(),
-    bitwise_and: vi.fn(),
+    bitwise_and: vi.fn(() => {
+      // OOM 시뮬레이션 — fine grind 분기에서 morph/watershed 우회 후 호출되는 cv 중
+      // bitwise_and 가 동전 mask 적용 단계라 항상 실행됨.
+      if (opts.oomMessage) {
+        throw new Error(opts.oomMessage);
+      }
+    }),
     morphologyEx: vi.fn(),
     distanceTransform: vi.fn(),
     normalize: vi.fn(),
     threshold: vi.fn(),
     connectedComponents: vi.fn(() => 2),
-    watershed: vi.fn(() => {
-      if (opts.oomMessage) {
-        throw new Error(opts.oomMessage);
-      }
-    }),
+    watershed: vi.fn(),
     findContours: vi.fn(),
     contourArea: vi.fn(() => {
       const a = contourAreas[areaIdx % Math.max(1, contourAreas.length)];

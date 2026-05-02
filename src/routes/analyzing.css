@@ -28,7 +28,12 @@
   height: 100%;
   background: var(--color-primary);
   border-radius: 999px;
-  transition: width var(--duration-base) var(--ease-inout);
+  /*
+   * 2026-05-02: duration-base (200ms) → 400ms 로 늘림. OpenCV 캐시 시 분석이
+   * 너무 빨라 progress bar 변화가 사용자에게 안 보이는 문제 완화. tick 양보
+   * (pipeline.ts setTimeout 80ms) 와 함께 단계 인지 효과.
+   */
+  transition: width 400ms var(--ease-inout);
 }
 
 .analyzing-progress-text {

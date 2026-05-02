@@ -23,14 +23,18 @@
 
 .result-section-title {
   color: var(--color-text-primary);
-  margin-bottom: var(--space-sm);
+  /* 좁은 화면에서 카드 헤더와 차트 첫 행 (Y축 tick) 겹침 방지 — sm → md 로 확대 */
+  margin: 0 0 var(--space-md) 0;
 }
 
 .result-histogram-section {
   background: var(--color-bg-surface);
   border-radius: var(--radius-lg);
-  padding: var(--space-md);
+  /* 위/아래 padding 비대칭 — 헤더와 차트 사이 호흡 공간 + 차트 X축 라벨 잘림 방지 */
+  padding: var(--space-md) var(--space-md) var(--space-lg);
   border: 1px solid var(--color-border);
+  /* ResponsiveContainer SVG 가 카드 모서리 밖으로 튀어나가는 것 차단 (모바일) */
+  overflow: hidden;
 }
 
 .result-data-inline {
@@ -173,4 +177,97 @@
 .result-error-message {
   color: var(--color-error);
   text-align: center;
+}
+
+.result-error-fix {
+  width: 100%;
+  max-width: 480px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  margin-top: var(--space-sm);
+}
+
+.result-error-fix h2 {
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-sm) 0;
+}
+
+.result-error-fix ul {
+  margin: 0;
+  padding-left: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.result-error-fix li {
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.result-error-diag {
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
+  margin-top: var(--space-xs);
+}
+
+/* 분포 기반 추출법 가이드 */
+.result-brewing-guide {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.result-guide-row {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: baseline;
+}
+
+.result-guide-tag {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-sm);
+  letter-spacing: -0.02em;
+}
+
+.tag-primary {
+  background: var(--color-primary);
+  color: var(--color-text-on-primary);
+}
+
+.tag-secondary {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.tag-avoid {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.result-guide-avoid {
+  color: var(--color-text-secondary);
+}
+
+.result-guide-caveat {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.result-clumps-meta {
+  color: var(--color-text-secondary);
+  margin: 0;
 }

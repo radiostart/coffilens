@@ -19,8 +19,17 @@
   left: 0;
   right: 0;
   display: flex;
-  justify-content: center;
+  justify-content: space-around;
+  align-items: center;
   pointer-events: none;
+  padding: 0 var(--space-2xl);
+}
+
+/* 좌측 placeholder — 셔터 정중앙 유지 + 우측 갤러리 버튼 대칭 균형 */
+.camera-control-spacer {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
 }
 
 .capture-button {
@@ -50,4 +59,41 @@
   height: 56px;
   border-radius: 50%;
   background: white;
+}
+
+/* 갤러리 업로드 버튼 — 셔터와 동등한 first-class 진입점 (iOS 카메라 앱 스타일) */
+.gallery-button {
+  pointer-events: auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.95);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: transform var(--duration-fast) var(--ease-inout),
+              background-color var(--duration-fast) var(--ease-inout);
+  position: relative;
+}
+
+.gallery-button:hover,
+.gallery-button:focus-within {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.gallery-button:active {
+  transform: scale(0.92);
+}
+
+.gallery-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }

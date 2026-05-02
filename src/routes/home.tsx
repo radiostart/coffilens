@@ -27,7 +27,7 @@ export function HomeRoute() {
           <EmptyStateCard
             title="첫 측정을 시작해보세요"
             description="분쇄한 원두와 동전을 같이 촬영하면 분쇄도를 측정해드려요"
-            cta={{ label: "분쇄도 측정하기", to: "/tool-select" }}
+            cta={{ label: "분쇄도 측정하기", to: "/coin-select" }}
             caption="아직 측정 기록이 없어요"
           />
         )}
@@ -37,14 +37,13 @@ export function HomeRoute() {
             <button
               type="button"
               className="btn-primary home-cta"
-              onClick={() => setLocation("/tool-select")}
+              onClick={() => setLocation("/coin-select")}
             >
               분쇄도 측정하기
             </button>
             <ul className="home-records" aria-label="측정 기록">
               {meta.map((record) => (
                 <li key={record.id} className="home-record-item">
-                  <span className="text-h4">{record.tool.toUpperCase()}</span>
                   <span className="text-body numeric">
                     D50 {Math.round(record.d50)}μm
                   </span>

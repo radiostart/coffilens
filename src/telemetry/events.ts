@@ -19,7 +19,7 @@ export type DeviceClass =
 
 export type TelemetryEvent =
   | { type: "app_open" }
-  | { type: "measurement_attempt"; toolKind: string }
+  | { type: "measurement_attempt"; coinType: "100" | "500" }
   | {
       type: "measurement_success";
       durationMs: number;

@@ -14,10 +14,15 @@
     "test:coverage": "vitest --run --coverage",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "check": "npm run typecheck && npm run lint && npm test",
-    "build:reject-fixtures": "tsx scripts/build-reject-fixtures.ts"
+    "build:reject-fixtures": "tsx scripts/build-reject-fixtures.ts",
+    "sync:opencv": "tsx scripts/sync-opencv.ts",
+    "postinstall": "tsx scripts/sync-opencv.ts",
+    "predev": "tsx scripts/sync-opencv.ts",
+    "prebuild": "tsx scripts/sync-opencv.ts"
   },
   "dependencies": {
     "@apps-in-toss/web-framework": "^2.4.7",
+    "@techstark/opencv-js": "^4.10.0-release.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^3.8.1",

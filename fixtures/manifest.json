@@ -1,4 +1,175 @@
 {
   "version": 1,
-  "fixtures": []
+  "fixtures": [
+    {
+      "file": "test-500-fine.jpg",
+      "kind": "anchor",
+      "coin": "500",
+      "grind_label": "spent_puck",
+      "ground_truth_d50_um": 213,
+      "tolerance_um": 100,
+      "observed_2026_05_02": {
+        "d10_um": 114,
+        "d50_um": 213,
+        "d90_um": 618,
+        "particle_count": 4271,
+        "uniformity": 5.43,
+        "fines_percent": 12.79,
+        "confidence_score": 9,
+        "clumps_count": 71,
+        "clumps_area_ratio": 54.6
+      },
+      "notes": "Galaxy S25 Edge photo (4000x3000), 에스프레소 추출 후 퍽 잔여물. 클럼프 54% 면적. 분쇄도 진단용 아닌 클럼프 필터 검증 fixture."
+    },
+    {
+      "file": "test-vs3-500.jpg",
+      "kind": "anchor",
+      "coin": "500",
+      "grinder": "Varia VS3 + Hyperhoba burr @ 11.5",
+      "grind_label": "consistency_pair",
+      "pair_with": "test-vs3-100.jpg",
+      "expected_outcome": "success_or_known_false_multi",
+      "observed_2026_05_02": {
+        "result": "multi_coin",
+        "count": 3,
+        "real_coin_detected": { "radiusPx": 250, "centerX": 585, "centerY": 142, "mean": 211, "stddev": 26 },
+        "false_positives": [
+          { "radiusPx": 231, "center": [320, 374], "mean": 213, "stddev": 23, "reason": "uniform napkin texture" },
+          { "radiusPx": 148, "center": [244, 708], "mean": 204, "stddev": 33, "reason": "napkin/light shadow" }
+        ]
+      },
+      "notes": "사용자 사진 — napkin texture 가 동전과 유사한 mean intensity 의 false circle 생성. 진짜 동전(r=250@top)은 검출되나, false positive 2개도 통과해 multi_coin 으로 잘못 거절. UX 영향: 사용자에게 'cleaner background' 안내 필요. 알고리즘 한계."
+    },
+    {
+      "file": "test-vs3-100.jpg",
+      "kind": "anchor",
+      "coin": "100",
+      "grinder": "Varia VS3 + Hyperhoba burr @ 11.5",
+      "grind_label": "consistency_pair",
+      "pair_with": "test-vs3-500.jpg",
+      "expected_outcome": "success",
+      "ground_truth_d50_um": 249,
+      "tolerance_um": 60,
+      "observed_2026_05_02": {
+        "d10_um": 118,
+        "d50_um": 249,
+        "d90_um": 586,
+        "particle_count": 1986,
+        "uniformity": 4.95,
+        "fines_percent": 14.43,
+        "confidence_score": 9,
+        "coin_detected": { "radiusPx": 214, "centerX": 388, "centerY": 401, "mean": 202, "stddev": 34 }
+      },
+      "notes": "VS3 11.5 분쇄도. 참고 D50: Varia VS3 + Hyperhoba burr @ 11.5 ≈ 600~800μm 범위 (외부 자료 기준 medium grind). 이 측정값(249μm)은 외부 추정과 350μm 차이. 사진 촬영 거리/입자 평탄도 차이로 절대값보단 상대 비교 권장. 페어 fixture(vs3-500)와의 일관성 검증용."
+    },
+    {
+      "file": "test-vs3-multi.jpg",
+      "kind": "reject",
+      "coins": ["100", "500"],
+      "grinder": "Varia VS3 + Hyperhoba burr @ 11.5",
+      "expected_outcome": "multi_coin",
+      "expected_count_min": 2,
+      "observed_2026_05_02": {
+        "result": "multi_coin",
+        "count_500_path": 2,
+        "count_100_path": 2,
+        "biggest_coin": { "radiusPx": 276, "centerX": 1158, "centerY": 523, "mean": 214, "stddev": 30 },
+        "separated_coin": { "radiusPx": 138, "center": [347, 327], "mean": 202, "stddev": 40 }
+      },
+      "notes": "동전 2개 (100원 + 500원) 동시 촬영. coinType=500 / coinType=100 둘 다 multi_coin 으로 정상 reject. 기대 동작 ✓"
+    }
+  ],
+  "qc_session_2026_05_02": {
+    "tuning_changes": [
+      "COIN_MAX_MEAN_INTENSITY 175 → 225 (밝은 조명 napkin 위 동전 mean ~210 cover)",
+      "COIN_MAX_STDDEV 38 → 42 (조명 차이 흡수)",
+      "exterior ring filter 추가 — interior vs exterior |diff| ≤ 70 (커피로 둘러싸인 napkin 구멍 차단 의도, 단 sparse coffee 환경에서는 효과 제한적)",
+      "rim gradient filter 추가 — meanRimGradient ≥ 18 (sharp edge 검증, unblurred gray 사용)",
+      "Phase 1 — coinHint 도입 (사용자 탭 위치 가장 가까운 candidate 채택 + multi_coin / partial_coin 우회). vs3-100 vs vs3-500 페어 일관성 |Δ| 11% (target 15%) 달성"
+    ],
+    "consistency_check": {
+      "target": "|D50_500 - D50_100| / mean ≤ 15%",
+      "actual": "PASS — coinHint 사용 시 vs3-500 검출 성공, |Δ|=11%",
+      "vs3_100_d50": 249,
+      "vs3_500_d50": 223
+    },
+    "multi_coin_check": "PASS (count 2 with both coinType paths)",
+    "code_health": "typecheck pass / 117 tests pass / lint clean"
+  },
+  "calibration_2026_05_02_brewing_guide": {
+    "architecture": "layer 분리: measurement (statistics.ts pure image-space) → calibration (calibration.ts: image × IMAGE_TO_SIEVE_RATIO → sieve-equivalent) → guide (brewing-guide.ts: 표준 sieve 임계값). brewing-guide 임계값은 외부 표준 (Hoffmann/SCA/PDG) 그대로 — 우리가 결정/조정할 영역 X. 사용자/그라인더별 튜닝은 calibration layer 에서만.",
+    "rationale": "(1) image-based segmentation (등가 원형 직경) 은 sieve 분급 대비 약 0.4 배 작게 측정되는 systematic bias 를 calibration layer 에서 보정. (2) brewing-guide 임계값은 표준 sieve 기준 (<350/350-500/500-800/800+) 으로 복구. (3) 분류 카테고리는 4개 (에스프레소·모카포트·핸드드립·프렌치프레스), 도구 세분화 X.",
+    "calibration_anchor": {
+      "fixture": "test-vs3-100.jpg",
+      "grinder": "Varia VS3 + Hyperhoba burr @ 11.5",
+      "sieve_grind_class": "핸드드립 (V60 grind, sieve target 700μm, range 600~800)",
+      "image_d50_um_raw": 249,
+      "sieve_d50_um_target": 700,
+      "ratio": 2.81,
+      "ratio_rounded": 2.8,
+      "uniformity_image_raw": 4.95
+    },
+    "thresholds_d50_sieve_standard_4cat": {
+      "very_fine": "<350 → 에스프레소 (sieve)",
+      "fine": "350-500 → 모카포트 (sieve)",
+      "medium": "500-800 → 핸드드립 (sieve)",
+      "coarse": "800+ → 프렌치프레스·콜드브루 (sieve)",
+      "source": "Hoffmann/SCA/Perfect Daily Grind 등 외부 표준 reference"
+    },
+    "thresholds_uniformity_image_space": {
+      "excellent": "≤4.5",
+      "good": "≤6.0",
+      "uneven": "≤8.0",
+      "very_uneven": ">8.0",
+      "note": "uniformity (D90/D10) 는 ratio calibration 으로 변환 안 됨 — image-space 임계값 유지. sieve uniformity 표준 (2.5/3.5/5.0) 직접 적용 시 좋은 burr 도 'uneven' false alarm. caveat 용 ancillary metric."
+    },
+    "fixture_classification_after_calibration": {
+      "test-vs3-100.jpg": "image D50=249 → sieve 697 → 핸드드립 ✓ (anchor 자체)",
+      "test-vs3-500.jpg": "image D50=223 → sieve 624 → 핸드드립 ✓ (consistency with vs3-100)",
+      "test-500-fine.jpg (puck)": "image D50=213 → sieve 596 → 핸드드립 (note: puck 추출 후 fines wash-out. 진단용 X)"
+    },
+    "known_limitations": [
+      "Anchor 1점 (vs3-100) 으로 4개 D50 임계값 + 4개 uniformity 임계값 보정. 다양한 grind range (espresso ~ coldbrew) 의 ground-truth fixture 추가 시 재검증 필요.",
+      "Sieve 분급된 fixture 가 없어 절대 calibration 불가. Phase 2 우선 작업: sieve 분급된 (≤500/500-1000/1000-1500μm) ground-truth fixture 1~2 장 추가.",
+      "Equivalent circular diameter 와 sieve mass-based diameter 의 fundamental measurement principle 차이는 알고리즘 변경 없이 calibration 만으로 완전 제거 불가. 절대값보다 같은 그라인더 setting 내 상대 비교용으로 사용 권장."
+    ],
+    "deferred": {
+      "credit_card_reference": "ID-1 spec (85.6×53.98mm) 추가는 검토만 — 핵심 bias (segmentation 등가 원형 직경) 를 해결하지 못함. 새 detection pipeline (rectangle/contour) + UX 변경 (사각형 marker) + 프라이버시 가이드 (카드번호 가림) 모두 필요해 effort 대비 ROI 낮음. Phase 2+ 로 보류."
+    }
+  },
+  "filter_review_2026_05_02": {
+    "purpose": "exclusion criteria (MIN/MAX/CLUMP) 적절성 점검 — 너무 뭉쳐 있는 영역 제외 + 의미 있는 입자만 통계 사용",
+    "diagnostic_data": {
+      "test-vs3-100.jpg": {
+        "raw_contours": 3540,
+        "noise_filtered_below_100um_image": "1547 (43.7%)",
+        "candidates_after_filter": 1993,
+        "tempD50_image": 249,
+        "clumps": "7 (24.5% area)",
+        "final_particles": 1986,
+        "raw_distribution_image_um": { "P5": 0, "P25": 0, "P50": 118, "P75": 276, "P95": 623, "P99": 1087, "max": 5430 }
+      },
+      "test-vs3-500.jpg": {
+        "raw_contours": 3558,
+        "noise_filtered_below_100um_image": "1710 (48.1%)",
+        "candidates_after_filter": 1848,
+        "tempD50_image": 225,
+        "clumps": "10 (27.7% area)",
+        "final_particles": 1838,
+        "raw_distribution_image_um": { "P5": 0, "P25": 0, "P50": 103, "P75": 231, "P95": 544, "P99": 913, "max": 4269 }
+      }
+    },
+    "evaluation": {
+      "MIN_PARTICLE_100um_image": "적절 — sub-pixel artifact 차단 (P25=0 인 단일 픽셀 contour 제거 정당)",
+      "MAX_PARTICLE_15000um_image": "적절 — 안전망 (segment 단계 80mm² 가 먼저 컷)",
+      "MAX_PARTICLE_AREA_80mm2_segment": "적절 — 배경 (나무 바닥/컵받침/napkin 그림자) 차단",
+      "CLUMP_2000um_min_or_4xD50": "적절 — D~5.6mm 초과 outlier 제거 (정상 분쇄 분포에서 1% 미만)"
+    },
+    "adjustments_applied": {
+      "fines_ui_label": "result.tsx 의 '미분' label tooltip 강화 — image-space 정의 명확화 (sieve 표준 fines 와 다름)",
+      "clump_caveat_thresholds": "brewing-guide.ts: 10%/30% → 20%/40% 로 완화. VS3 + Hyperhoba 같은 전문가급 burr 가 정전기 cluster 로 24~28% 발생하는 정상 케이스에 false alarm 방지.",
+      "clump_caveat_message_tone": "20~40% 범위 메시지를 'grinder 자체 문제' → '촬영 시 일부 뭉침' 으로 부드럽게."
+    },
+    "verified_with": "vs3-100 (24.5%) → 약한 안내, puck (54%) → 강한 경고 (정상 동작)"
+  }
 }

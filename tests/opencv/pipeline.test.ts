@@ -81,11 +81,13 @@ beforeEach(() => {
 describe("runPipeline — 정상 흐름", () => {
   it("PipelineResult 반환 + 단계별 onProgress 호출", async () => {
     const onProgress = vi.fn();
-    const result = await runPipeline(fakeCanvas(), new AbortController().signal, {
+    const result = await runPipeline(fakeCanvas(), "500", new AbortController().signal, {
       onProgress,
     });
 
-    expect(result.stats.d50).toBe(720);
+    // pipeline 이 computeStats 출력에 image→sieve calibration (×2.8) 적용.
+    // mock d50=720 (image-space) → 720 × 2.8 = 2016 (sieve-equivalent).
+    expect(result.stats.d50).toBeCloseTo(720 * 2.8, 5);
     expect(result.coin.coinType).toBe("500");
     expect(result.confidence.score).toBe(8);
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
@@ -101,12 +103,12 @@ describe("runPipeline — 정상 흐름", () => {
   });
 
   it("disposeSegmentation 이 finally 에서 호출됨", async () => {
-    await runPipeline(fakeCanvas(), new AbortController().signal);
+    await runPipeline(fakeCanvas(), "500", new AbortController().signal);
     expect(segmentMod.disposeSegmentation).toHaveBeenCalledOnce();
   });
 
   it("confidence 입력에 inputQuality 실제 값 사용 (sweep Issue 14)", async () => {
-    await runPipeline(fakeCanvas(), new AbortController().signal);
+    await runPipeline(fakeCanvas(), "500", new AbortController().signal);
     expect(confidenceMod.computeConfidence).toHaveBeenCalledWith(
       expect.objectContaining({
         meanBrightness: 150, // checkInputQuality mock 반환값
@@ -121,14 +123,14 @@ describe("runPipeline — AbortSignal", () => {
     const ac = new AbortController();
     ac.abort();
     await expect(
-      runPipeline(fakeCanvas(), ac.signal),
+      runPipeline(fakeCanvas(), "500", ac.signal),
     ).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("downsample 후 abort → 다음 단계 진입 X", async () => {
     const ac = new AbortController();
     ac.abort();
-    await expect(runPipeline(fakeCanvas(), ac.signal)).rejects.toThrow();
+    await expect(runPipeline(fakeCanvas(), "500", ac.signal)).rejects.toThrow();
     // checkInputQuality 호출 안 됨
     expect(coinMod.checkInputQuality).not.toHaveBeenCalled();
   });
@@ -141,7 +143,7 @@ describe("runPipeline — AbortSignal", () => {
       throw new DOMException("aborted", "AbortError");
     });
 
-    await expect(runPipeline(fakeCanvas(), ac.signal)).rejects.toThrow();
+    await expect(runPipeline(fakeCanvas(), "500", ac.signal)).rejects.toThrow();
     expect(segmentMod.disposeSegmentation).toHaveBeenCalled();
   });
 });
@@ -153,7 +155,7 @@ describe("runPipeline — 에러 변환", () => {
     });
 
     await expect(
-      runPipeline(fakeCanvas(), new AbortController().signal),
+      runPipeline(fakeCanvas(), "500", new AbortController().signal),
     ).rejects.toMatchObject({ kind: "no_particles" });
   });
 });

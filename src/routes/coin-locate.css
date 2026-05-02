@@ -1,0 +1,121 @@
+.coin-locate {
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  align-items: stretch;
+  min-height: calc(100dvh - 56px);
+}
+
+.coin-locate-loading {
+  padding: var(--space-2xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.coin-locate-instruction {
+  color: var(--color-text-primary);
+  text-align: center;
+  margin: 0;
+}
+
+.coin-locate-help {
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin: 0;
+}
+
+.coin-locate-wrapper {
+  position: relative;
+  width: 100%;
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  flex: 1 1 auto;
+  min-height: 300px;
+  max-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.coin-locate-image {
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+  display: block;
+  cursor: crosshair;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.coin-locate-marker {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  width: 0;
+  height: 0;
+}
+
+.coin-locate-marker-ring {
+  position: absolute;
+  left: -28px;
+  top: -28px;
+  width: 56px;
+  height: 56px;
+  border: 3px solid var(--color-success);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 0 12px rgba(74, 139, 92, 0.6);
+  animation: coin-locate-pulse 1.5s ease-in-out infinite;
+}
+
+.coin-locate-marker-dot {
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  background: var(--color-success);
+  border: 2px solid white;
+  border-radius: 50%;
+}
+
+@keyframes coin-locate-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.7;
+  }
+}
+
+.coin-locate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.coin-locate-skip {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  padding: var(--space-sm);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.coin-locate-skip:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}

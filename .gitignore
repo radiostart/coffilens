@@ -14,3 +14,6 @@ coverage/
 
 # Build artifacts
 .granite/
+
+# Vendored from npm via scripts/sync-opencv.ts (postinstall)
+public/opencv.js

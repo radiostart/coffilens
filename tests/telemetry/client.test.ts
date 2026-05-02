@@ -20,13 +20,13 @@ describe("TossAdapter", () => {
     const eventLog = vi.fn();
     const adapter = new TossAdapter(eventLog);
 
-    adapter.track({ type: "measurement_attempt", toolKind: "v60" });
+    adapter.track({ type: "measurement_attempt", coinType: "500" });
 
     expect(eventLog).toHaveBeenCalledOnce();
     const call = eventLog.mock.calls[0][0];
     expect(call.log_name).toBe("measurement_attempt");
     expect(call.log_type).toBe("event");
-    expect(call.params.toolKind).toBe("v60");
+    expect(call.params.coinType).toBe("500");
     expect(call.params.deviceClass).toBeDefined();
     expect(call.params.sessionId).toBeDefined();
     expect(call.params.timestamp).toBeDefined();

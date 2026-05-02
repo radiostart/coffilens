@@ -57,7 +57,6 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     const meta: RecordMeta = {
       id: full.id,
       timestamp: full.timestamp,
-      tool: full.tool,
       d50: full.d50,
       d10: full.d10,
       d90: full.d90,

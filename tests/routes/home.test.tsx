@@ -28,7 +28,6 @@ afterEach(async () => {
 
 function fakeRecord() {
   return {
-    tool: "v60",
     thumbnail: new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" }),
     d50: 720,
     d10: 480,
@@ -55,8 +54,8 @@ describe("HomeRoute", () => {
     render(<HomeRoute />);
 
     await waitFor(() => {
-      expect(screen.getByText("V60")).toBeDefined();
+      expect(screen.getByText(/720μm/)).toBeDefined();
     });
-    expect(screen.getByText(/720μm/)).toBeDefined();
+    expect(screen.getByText(/신뢰도 8\/10/)).toBeDefined();
   });
 });

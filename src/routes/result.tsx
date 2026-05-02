@@ -7,34 +7,30 @@ import {
   type ConfidenceVariant,
 } from "../components/confidence-bar";
 import { DisclaimerBanner } from "../components/disclaimer-banner";
-import { useMeasurementStore, type ToolId } from "../stores/measurement.store";
+import { useMeasurementStore } from "../stores/measurement.store";
 import { useHistoryStore } from "../stores/history.store";
-import { userMessage } from "../opencv/errors";
-import { buildMessages } from "../recommendation/messages";
-import { getOtherTools } from "../recommendation/matrix";
+import { errorDetails } from "../opencv/errors";
 import { makeThumbnail } from "../lib/thumbnail";
+import { buildBrewingGuide } from "../lib/brewing-guide";
 import "./result.css";
 
 /**
- * 결과 화면 — plain.md Section 19-2 wireframe 적용.
+ * 결과 화면 — 순수 측정 결과 표시 (도구별 추천 없음).
  *
  * 위계:
- *  1. 진단 라벨 + D50 (1차)
+ *  1. D50 (1차)
  *  2. 신뢰도 가로 바 (1.5차)
  *  3. 히스토그램 (2차)
  *  4. inline data list (3차)
- *  5. 추천 레시피 (2차)
+ *  5. 신뢰도/입자수 경고 (있을 때만)
  *  6. 검출 동전 메타 (3차)
  *  7. sticky 디스클레이머
- *  8. CTA 측정 저장 (F08 placeholder)
- *  9. 저장 후 "다른 도구로 보기" chip 그룹
+ *  8. CTA 측정 저장
  */
 export function ResultRoute() {
   const result = useMeasurementStore((s) => s.result);
   const error = useMeasurementStore((s) => s.error);
-  const tool = useMeasurementStore((s) => s.tool);
   const frame = useMeasurementStore((s) => s.frame);
-  const setTool = useMeasurementStore((s) => s.setTool);
   const saveHistory = useHistoryStore((s) => s.save);
   const [, setLocation] = useLocation();
   const [saved, setSaved] = useState(false);
@@ -50,14 +46,35 @@ export function ResultRoute() {
   }, [savedAt]);
 
   if (error) {
+    const details = errorDetails(error);
     return (
       <>
         <NavBar title="분석 실패" />
         <main className="result-error" aria-label="에러 화면">
-          <h1 className="text-h2">분석을 완료하지 못했어요</h1>
+          <h1 className="text-h2">{details.title}</h1>
           <p className="text-body-large result-error-message">
-            {userMessage(error) || "예상치 못한 에러가 발생했어요."}
+            {details.whatHappened}
           </p>
+          {details.howToFix.length > 0 && (
+            <section
+              className="result-error-fix"
+              aria-label="해결 방법"
+            >
+              <h2 className="text-h3">이렇게 해보세요</h2>
+              <ul>
+                {details.howToFix.map((step, i) => (
+                  <li key={i} className="text-body">
+                    {step}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {details.diagnostics && (
+            <p className="text-caption result-error-diag" aria-label="진단 정보">
+              📊 {details.diagnostics}
+            </p>
+          )}
           <button
             type="button"
             className="btn-primary"
@@ -77,7 +94,7 @@ export function ResultRoute() {
     );
   }
 
-  if (!result || !tool) {
+  if (!result) {
     return (
       <>
         <NavBar title="분석 결과" />
@@ -96,24 +113,31 @@ export function ResultRoute() {
     );
   }
 
-  const messages = buildMessages(result.stats, tool, result.confidence.score);
   const variant: ConfidenceVariant =
     result.confidence.score >= 8
       ? "success"
       : result.confidence.score >= 5
         ? "warning"
         : "error";
-  const otherTools = getOtherTools(tool);
+
+  const warnings: string[] = [];
+  if (result.confidence.score < 5) {
+    warnings.push("신뢰도가 낮아요. 더 밝은 곳에서 재측정을 권장합니다.");
+  }
+  if (result.stats.particleCount < 100) {
+    warnings.push(
+      `검출된 입자가 적어요(${result.stats.particleCount}개). 통계 신뢰도가 낮을 수 있습니다.`,
+    );
+  }
 
   async function handleSave() {
-    if (!result || !tool) return;
+    if (!result) return;
     try {
       setSaveError(null);
       const thumbnail = frame
         ? await makeThumbnail(frame)
         : new Blob([new Uint8Array(0)], { type: "image/jpeg" });
       const { cleanedCount: cleaned } = await saveHistory({
-        tool,
         thumbnail,
         d50: result.stats.d50,
         d10: result.stats.d10,
@@ -132,26 +156,17 @@ export function ResultRoute() {
     }
   }
 
-  function handleSwitchTool(t: ToolId) {
-    setTool(t);
-    // 같은 result 유지하되 tool 만 변경 — useMemo 로 messages 재계산.
-    // 사용자가 화면에 머물기 원하므로 navigate X.
-  }
-
   return (
     <>
       <NavBar title="분석 결과" />
       <main className="result" aria-label="측정 결과">
-        {/* 1차 진단 + D50 */}
+        {/* 1차 — 분쇄도 (D50, 입자 크기 중앙값) */}
         <header className="result-headline">
           <h1 className="text-display result-diagnosis">
-            {messages.headline}
+            분쇄도 {Math.round(result.stats.d50)}μm
           </h1>
-          <p
-            className="text-body-large result-tool-fit"
-            aria-live="polite"
-          >
-            {messages.toolFitMessage}
+          <p className="text-body-large result-tool-fit">
+            전체 입자 중 절반이 이 크기보다 작아요 (중앙값)
           </p>
         </header>
 
@@ -173,13 +188,32 @@ export function ResultRoute() {
           aria-label="입자 분포"
         >
           <h2 className="text-h3 result-section-title">입자 분포</h2>
-          <Histogram diameters={result.stats.diameters} />
+          <Histogram
+            diameters={result.stats.diameters}
+            d10={result.stats.d10}
+            d50={result.stats.d50}
+            d90={result.stats.d90}
+          />
         </section>
 
-        {/* 3차 inline data list */}
+        {/* 3차 inline data list — 작은쪽 → 중앙 → 큰쪽 progression 으로 정렬,
+            그 뒤 균일도 / 미분. 사용자 친화 라벨 (기술 용어 D10/D50/D90 회피) */}
         <dl className="result-data-inline" aria-label="측정 통계">
           <div>
-            <dt className="text-caption">D50</dt>
+            <dt className="text-caption" title="D10 — 작은 입자 10% 경계">
+              작은 쪽
+            </dt>
+            <dd className="text-h4 numeric">
+              {Math.round(result.stats.d10)}μm
+            </dd>
+          </div>
+          <span className="result-data-sep" aria-hidden="true">
+            ·
+          </span>
+          <div>
+            <dt className="text-caption" title="D50 — 중앙값 (입자 절반의 경계)">
+              중앙
+            </dt>
             <dd className="text-h4 numeric">
               {Math.round(result.stats.d50)}μm
             </dd>
@@ -188,7 +222,23 @@ export function ResultRoute() {
             ·
           </span>
           <div>
-            <dt className="text-caption">균일도</dt>
+            <dt className="text-caption" title="D90 — 큰 입자 10% 경계">
+              큰 쪽
+            </dt>
+            <dd className="text-h4 numeric">
+              {Math.round(result.stats.d90)}μm
+            </dd>
+          </div>
+          <span className="result-data-sep" aria-hidden="true">
+            ·
+          </span>
+          <div>
+            <dt
+              className="text-caption"
+              title="입자 크기 균일성 (작을수록 고름, D90/D10 비율)"
+            >
+              균일도
+            </dt>
             <dd className="text-h4 numeric">
               {result.stats.uniformity.toFixed(2)}
             </dd>
@@ -197,29 +247,77 @@ export function ResultRoute() {
             ·
           </span>
           <div>
-            <dt className="text-caption">Fines</dt>
+            <dt
+              className="text-caption"
+              title="image 측정 기준 작은 입자 (≤300μm) 면적 비율 — 같은 분쇄 내 상대 비교용"
+            >
+              미분
+            </dt>
             <dd className="text-h4 numeric">
               {result.stats.finesPercent.toFixed(1)}%
             </dd>
           </div>
         </dl>
 
-        {/* 2차 추천 */}
-        <section className="result-recommendation">
-          <h2 className="text-h3 result-section-title">📌 추출 가이드</h2>
-          <p className="text-body-large">{messages.recipe}</p>
-        </section>
-
         {/* warnings (있을 때만) */}
-        {messages.warnings.length > 0 && (
+        {warnings.length > 0 && (
           <ul className="result-warnings" aria-label="경고">
-            {messages.warnings.map((w, i) => (
+            {warnings.map((w, i) => (
               <li key={i} className="text-body">
                 {w}
               </li>
             ))}
           </ul>
         )}
+
+        {/* 2차 — 분포 기반 추출법 가이드 */}
+        {(() => {
+          const guide = buildBrewingGuide({
+            d50: result.stats.d50,
+            uniformity: result.stats.uniformity,
+            clumpAreaRatio: result.stats.clumps.areaRatio,
+          });
+          return (
+            <section
+              className="result-brewing-guide"
+              aria-label="추출 가이드"
+            >
+              <h2 className="text-h3 result-section-title">☕ 어떻게 추출할까요?</h2>
+              <div className="result-guide-row">
+                <span className="result-guide-tag tag-primary">추천</span>
+                <span className="text-body">{guide.primary.join(" · ")}</span>
+              </div>
+              {guide.secondary.length > 0 && (
+                <div className="result-guide-row">
+                  <span className="result-guide-tag tag-secondary">차선</span>
+                  <span className="text-body">
+                    {guide.secondary.join(" · ")}
+                  </span>
+                </div>
+              )}
+              {guide.avoid.length > 0 && (
+                <div className="result-guide-row">
+                  <span className="result-guide-tag tag-avoid">비추</span>
+                  <span className="text-body result-guide-avoid">
+                    {guide.avoid.join(" · ")}
+                  </span>
+                </div>
+              )}
+              {guide.caveat && (
+                <p className="text-caption result-guide-caveat">
+                  ⚠️ {guide.caveat}
+                </p>
+              )}
+              {result.stats.clumps.count > 0 && (
+                <p className="text-caption result-clumps-meta">
+                  🔸 클럼프 {result.stats.clumps.count}개 (
+                  {result.stats.clumps.totalAreaMm2.toFixed(0)}mm²,{" "}
+                  {result.stats.clumps.areaRatio.toFixed(1)}%) 통계에서 제외됨
+                </p>
+              )}
+            </section>
+          );
+        })()}
 
         {/* 3차 검출 동전 메타 */}
         <p className="text-caption result-coin-meta">
@@ -266,27 +364,6 @@ export function ResultRoute() {
                 )}
               </p>
             )}
-            <section
-              className="result-other-tools"
-              aria-label="다른 도구로 보기"
-            >
-              <p className="text-caption result-other-tools-label">
-                다른 도구로도 보기
-              </p>
-              <div className="result-chip-group">
-                {otherTools.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    className="result-chip"
-                    onClick={() => handleSwitchTool(t)}
-                    aria-pressed={tool === t}
-                  >
-                    {TOOL_LABELS[t]}
-                  </button>
-                ))}
-              </div>
-            </section>
             <button
               type="button"
               className="result-secondary"
@@ -300,11 +377,3 @@ export function ResultRoute() {
     </>
   );
 }
-
-const TOOL_LABELS: Record<ToolId, string> = {
-  v60: "V60",
-  kalita: "Kalita Wave",
-  clever: "Clever",
-  origami: "Origami",
-  chemex: "Chemex",
-};

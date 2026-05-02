@@ -30,7 +30,6 @@ function makeBlob(): Blob {
 
 function fakeRecordInput(overrides: Partial<Parameters<typeof saveRecord>[0]> = {}) {
   return {
-    tool: "v60",
     thumbnail: makeBlob(),
     d50: 720,
     d10: 480,
@@ -57,12 +56,12 @@ describe("saveRecord + listRecordsMeta", () => {
   });
 
   it("3개 저장 → timestamp 최신순 정렬", async () => {
-    await saveRecord(fakeRecordInput({ timestamp: 1000, tool: "v60" }));
-    await saveRecord(fakeRecordInput({ timestamp: 3000, tool: "kalita" }));
-    await saveRecord(fakeRecordInput({ timestamp: 2000, tool: "clever" }));
+    await saveRecord(fakeRecordInput({ timestamp: 1000, d50: 600 }));
+    await saveRecord(fakeRecordInput({ timestamp: 3000, d50: 800 }));
+    await saveRecord(fakeRecordInput({ timestamp: 2000, d50: 700 }));
 
     const meta = await listRecordsMeta();
-    expect(meta.map((m) => m.tool)).toEqual(["kalita", "clever", "v60"]);
+    expect(meta.map((m) => m.d50)).toEqual([800, 700, 600]);
   });
 
   it("id 자동 생성 — 충돌 없음", async () => {
@@ -90,29 +89,29 @@ describe("getThumbnail", () => {
 
 describe("deleteRecord", () => {
   it("삭제 후 listRecordsMeta 에서 빠짐", async () => {
-    const a = await saveRecord(fakeRecordInput({ tool: "v60" }));
-    await saveRecord(fakeRecordInput({ tool: "kalita" }));
+    const a = await saveRecord(fakeRecordInput({ d50: 600 }));
+    await saveRecord(fakeRecordInput({ d50: 800 }));
 
     await deleteRecord(a.id);
 
     const meta = await listRecordsMeta();
     expect(meta).toHaveLength(1);
-    expect(meta[0].tool).toBe("kalita");
+    expect(meta[0].d50).toBe(800);
   });
 });
 
 describe("deleteOldest", () => {
   it("가장 오래된 N개 삭제", async () => {
-    await saveRecord(fakeRecordInput({ timestamp: 1000, tool: "v60" }));
-    await saveRecord(fakeRecordInput({ timestamp: 2000, tool: "kalita" }));
-    await saveRecord(fakeRecordInput({ timestamp: 3000, tool: "clever" }));
+    await saveRecord(fakeRecordInput({ timestamp: 1000, d50: 600 }));
+    await saveRecord(fakeRecordInput({ timestamp: 2000, d50: 700 }));
+    await saveRecord(fakeRecordInput({ timestamp: 3000, d50: 800 }));
 
     const deleted = await deleteOldest(2);
     expect(deleted).toBe(2);
 
     const meta = await listRecordsMeta();
     expect(meta).toHaveLength(1);
-    expect(meta[0].tool).toBe("clever");
+    expect(meta[0].d50).toBe(800);
   });
 
   it("0 입력 → 즉시 0 반환", async () => {

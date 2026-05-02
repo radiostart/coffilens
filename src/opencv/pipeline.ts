@@ -18,12 +18,14 @@
 import { downsampleImage } from "../lib/image-downsample";
 import { checkInputQuality, detectCoin } from "./coin-detect";
 import type { CoinDetection } from "./coin-detect";
+import type { CoinType } from "../stores/measurement.store";
 import {
   segmentParticles,
   disposeSegmentation,
 } from "./particle-segment";
 import { computeStats } from "./statistics";
 import type { ParticleStats } from "./statistics";
+import { applyImageToSieveCalibration } from "./calibration";
 import { computeConfidence } from "./confidence";
 import type { ConfidenceResult } from "./confidence";
 import type { AnalysisError } from "./errors";
@@ -49,32 +51,55 @@ export interface PipelineCallbacks {
 
 export async function runPipeline(
   source: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement,
+  coinType: CoinType,
   signal: AbortSignal,
   callbacks: PipelineCallbacks = {},
+  coinHint?: { x: number; y: number } | null,
 ): Promise<PipelineResult> {
   const start =
     typeof performance !== "undefined" && performance.now
       ? performance.now()
       : Date.now();
 
+  function step<T>(label: string, fn: () => Promise<T> | T): Promise<T> {
+    const t0 = performance.now();
+    console.log(`[pipeline] ${label} start`);
+    return Promise.resolve(fn()).then(
+      (result) => {
+        console.log(`[pipeline] ${label} done (${Math.round(performance.now() - t0)}ms)`);
+        return result;
+      },
+      (err) => {
+        console.warn(
+          `[pipeline] ${label} FAILED (${Math.round(performance.now() - t0)}ms)`,
+          err,
+        );
+        throw err;
+      },
+    );
+  }
+
   signal.throwIfAborted();
   callbacks.onProgress?.("downsample", 0);
-  const canvas = downsampleImage(source);
+  const canvas = await step("downsample", () => downsampleImage(source));
+  console.log(`[pipeline] downsampled canvas: ${canvas.width}×${canvas.height}`);
   await tick();
 
   signal.throwIfAborted();
   callbacks.onProgress?.("preflight", 15);
-  const inputQuality = await checkInputQuality(canvas);
+  const inputQuality = await step("preflight", () => checkInputQuality(canvas));
   await tick();
 
   signal.throwIfAborted();
   callbacks.onProgress?.("coin", 30);
-  const coin = await detectCoin(canvas);
+  const coin = await step("coin", () => detectCoin(canvas, coinType, coinHint));
   await tick();
 
   signal.throwIfAborted();
   callbacks.onProgress?.("segment", 50);
-  const segmentation = await segmentParticles(canvas, coin);
+  const segmentation = await step("segment", () =>
+    segmentParticles(canvas, coin),
+  );
 
   try {
     // sweep Issue 17: segmentParticles 반환 직후 abort 재확인 (watershed 후)
@@ -83,7 +108,13 @@ export async function runPipeline(
 
     let stats: ParticleStats;
     try {
-      stats = computeStats(segmentation.contours, coin.mmPerPixel);
+      // 1) computeStats — pure image-space 측정 (raw 등가 원형 직경)
+      const rawStats = computeStats(segmentation.contours, coin.mmPerPixel);
+      // 2) image → sieve calibration (D-value/diameters[] 만 변환).
+      //    brewing-guide.ts 가 sieve 표준 임계값을 그대로 사용할 수 있도록
+      //    layer 분리. anchor: vs3-100 (V60 grind, ratio 2.8). 상세는
+      //    src/opencv/calibration.ts doc-comment 참조.
+      stats = applyImageToSieveCalibration(rawStats);
     } catch {
       // computeStats 의 빈 배열 throw → no_particles 로 변환
       throw { kind: "no_particles" } satisfies AnalysisError;
@@ -110,7 +141,19 @@ export async function runPipeline(
   }
 }
 
-/** microtask 양보 — abort 응답성 + UI 끊김 방지 */
+/**
+ * 단계 사이 양보 — abort 응답성 + UI paint 시간 확보.
+ *
+ * **2026-05-02 변경**: setTimeout 0 → 80ms.
+ *
+ * OpenCV 가 캐시된 상태에서는 단계 자체 (downsample/preflight/coin/segment/
+ * stats/confidence) 가 합쳐 ~수백 ms 안에 완료. setTimeout 0 (microtask 양보) 만으로는
+ * React render → DOM paint 사이 frame 사이클이 user 에게 보이지 않아 progress
+ * bar 가 단계별로 변하지 않고 결과 화면으로 점프하는 것처럼 보임.
+ *
+ * 80ms × 6단계 ≈ 480ms 추가 → 사용자가 단계별 진행 인지 가능. cache 안 된
+ * 상태에서는 전체 분석 시간 (~수 초) 대비 비중 작아 영향 미미.
+ */
 function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  return new Promise((resolve) => setTimeout(resolve, 80));
 }

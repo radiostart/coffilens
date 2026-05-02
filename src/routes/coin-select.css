@@ -1,20 +1,20 @@
-.tool-select {
+.coin-select {
   padding: var(--space-lg) var(--space-md);
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
 }
 
-.tool-select-heading {
+.coin-select-heading {
   color: var(--color-text-primary);
 }
 
-.tool-select-description {
+.coin-select-description {
   color: var(--color-text-secondary);
   margin-bottom: var(--space-md);
 }
 
-.tool-select-list {
+.coin-select-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -23,42 +23,63 @@
   gap: var(--space-sm);
 }
 
-.tool-card {
+.coin-card {
   width: 100%;
   background: var(--color-bg-surface);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   padding: var(--space-md);
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-xs);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-md);
   text-align: left;
-  min-height: 64px;
+  min-height: 72px;
   transition:
     border-color var(--duration-fast) var(--ease-inout),
     background-color var(--duration-fast) var(--ease-inout),
     transform var(--duration-fast) var(--ease-inout);
 }
 
-.tool-card:hover {
+.coin-card:hover {
   border-color: var(--color-primary);
   background: var(--color-primary-subtle);
 }
 
-.tool-card:active {
+.coin-card:active {
   transform: scale(0.99);
 }
 
-.tool-card:focus-visible {
+.coin-card:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
-.tool-card-name {
+.coin-card-icon {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-primary-subtle);
+  border: 2px solid var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.coin-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  flex: 1;
+}
+
+.coin-card-name {
   color: var(--color-text-primary);
 }
 
-.tool-card-desc {
+.coin-card-desc {
   color: var(--color-text-secondary);
 }

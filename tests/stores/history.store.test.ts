@@ -21,7 +21,6 @@ afterEach(async () => {
 
 function fakeRecordInput() {
   return {
-    tool: "v60",
     thumbnail: new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" }),
     d50: 720,
     d10: 480,

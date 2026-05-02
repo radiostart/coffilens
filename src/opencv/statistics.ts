@@ -6,7 +6,9 @@
  * 등가 직경 가정: 원으로 근사 → D = 2 * sqrt(A / PI).
  * 실제 입자는 각진 형상이 많아 실제 직경보다 5~15% 과소평가 (디스클레이머 정당화).
  *
- * 노이즈 필터: 100μm 미만 입자 제거 (watershed oversegment + 카메라 노이즈).
+ * 노이즈 필터:
+ *  - 100μm 미만 입자 제거 (watershed oversegment + 카메라 노이즈)
+ *  - 10000μm (10mm) 초과 contour 제거 (배경: wood floor, 컵받침, napkin 그림자)
  *
  * Division-by-zero 가드:
  *  - 빈 배열 → throw (호출자가 no_particles 처리)
@@ -39,24 +41,50 @@ export interface ParticleStats {
   totalAreaMm2: number;
   /** 정렬된 직경 배열 (μm) — 히스토그램 입력 (F07) */
   diameters: number[];
+  /** 클럼프 (분쇄가 안 된 덩어리, 통계에서 제외된 입자) 통계 */
+  clumps: {
+    count: number;
+    totalAreaMm2: number;
+    /** 전체 면적 대비 클럼프 면적 비율 (백분율 0~100) — UI 경고 임계값 */
+    areaRatio: number;
+  };
 }
 
 const MIN_PARTICLE_DIAMETER_UM = 100;
+// image-space 기준 — sieve 표준 fines (<300μm sieve) 와 다름. UI 에서 "미분"
+// 으로 표시되지만 의미는 "측정 직경 ≤ 300μm 작은 입자 면적 비율" 로 같은 분쇄
+// 내 상대 비교용. calibration 변환에 영향받지 않음 (statistics.ts 는 image-space).
 const FINES_THRESHOLD_UM = 300;
+// tuned 2026-05-02 for fine grind 500원 fixture, see fixtures/manifest.json
+// 배경 (나무 바닥, 컵받침, napkin 가장자리 그림자) 으로 간주 — 가장 굵은 분쇄도
+// (French Press ~1.2mm) + whole bean (~8mm) 도 충분히 포괄하는 15mm 임계.
+// 15mm 초과는 사실상 분쇄 입자가 아닌 배경 영역.
+const MAX_PARTICLE_DIAMETER_UM = 15000;
+
+// 클럼프 (덩어리) 분리 임계 — 통계 오염 방지.
+// tuned 2026-05-02 for fine grind 500원 fixture, see fixtures/manifest.json
+// 분쇄가 안 된 덩어리, 추출 후 압착된 퍽 잔여물 등 "정상 입자" 가 아닌 outlier.
+// 양쪽 조건 만족 시 클럼프로 분류 (false positive 최소화):
+//   1. 절대 크기: 직경 > 2mm (정상 분쇄 최대 ~1.5mm 대비 충분히 큼)
+//   2. 상대 크기: 중앙값(D50) 의 4배 초과 (분포 자체가 굵을 때도 정상 입자는 4배 이내)
+const CLUMP_MIN_DIAMETER_UM = 2000;
+const CLUMP_MEDIAN_MULTIPLIER = 4;
 
 export function computeStats(
   contours: CvMatVector,
   mmPerPixel: number,
 ): ParticleStats {
-  const diameters: number[] = [];
-  let totalAreaMm2 = 0;
-  let finesAreaMm2 = 0;
+  // 1단계: 모든 contour 의 직경 + 면적 수집 (배경/노이즈 1차 필터)
+  const candidates: Array<{ diameterUm: number; areaMm2: number }> = [];
+  // diagnostic: 필터별 카운트 + raw 분포 통계 (DEBUG_STATS=1 시 출력)
+  let belowMinCount = 0;
+  let aboveMaxCount = 0;
+  const rawDiameters: number[] = [];
 
   const numContours = contours.size();
   for (let i = 0; i < numContours; i++) {
     const c = contours.get(i);
     const areaPx = cv.contourArea(c);
-    // jsdom mock 호환 — get() 이 새 핸들 반환할 수 있어 try/catch
     try {
       c.delete();
     } catch {
@@ -67,8 +95,44 @@ export function computeStats(
     const diameterMm = 2 * Math.sqrt(areaMm2 / Math.PI);
     const diameterUm = diameterMm * 1000;
 
-    if (diameterUm < MIN_PARTICLE_DIAMETER_UM) continue;
+    rawDiameters.push(diameterUm);
 
+    if (diameterUm < MIN_PARTICLE_DIAMETER_UM) {
+      belowMinCount++;
+      continue;
+    }
+    if (diameterUm > MAX_PARTICLE_DIAMETER_UM) {
+      aboveMaxCount++;
+      continue;
+    }
+
+    candidates.push({ diameterUm, areaMm2 });
+  }
+
+  if (candidates.length === 0) {
+    throw new Error("computeStats: 입자 0개 (필터 후)");
+  }
+
+  // 2단계: 임시 D50 계산 → 클럼프 임계 결정.
+  const tempSorted = candidates.map((c) => c.diameterUm).sort((a, b) => a - b);
+  const tempD50 = percentile(tempSorted, 0.5);
+  const clumpThresholdUm = Math.max(
+    CLUMP_MIN_DIAMETER_UM,
+    tempD50 * CLUMP_MEDIAN_MULTIPLIER,
+  );
+
+  // 3단계: 클럼프 분리. 정상 입자 통계와 분리 보고.
+  const diameters: number[] = [];
+  let totalAreaMm2 = 0;
+  let finesAreaMm2 = 0;
+  let clumpCount = 0;
+  let clumpAreaMm2 = 0;
+  for (const { diameterUm, areaMm2 } of candidates) {
+    if (diameterUm > clumpThresholdUm) {
+      clumpCount++;
+      clumpAreaMm2 += areaMm2;
+      continue;
+    }
     diameters.push(diameterUm);
     totalAreaMm2 += areaMm2;
     if (diameterUm < FINES_THRESHOLD_UM) {
@@ -77,7 +141,7 @@ export function computeStats(
   }
 
   if (diameters.length === 0) {
-    throw new Error("computeStats: 입자 0개 (필터 후)");
+    throw new Error("computeStats: 클럼프 필터 후 정상 입자 0개");
   }
 
   diameters.sort((a, b) => a - b);
@@ -89,6 +153,34 @@ export function computeStats(
   const finesPercent =
     totalAreaMm2 > 0 ? (finesAreaMm2 / totalAreaMm2) * 100 : 0;
 
+  const clumpAreaRatio =
+    totalAreaMm2 + clumpAreaMm2 > 0
+      ? (clumpAreaMm2 / (totalAreaMm2 + clumpAreaMm2)) * 100
+      : 0;
+
+  // diagnostic: raw → 필터 breakdown → 통계 입자 수.
+  // DEBUG_STATS=1 환경변수 설정 시에만 출력 (production 노이즈 방지).
+  if (
+    typeof globalThis.process !== "undefined" &&
+    globalThis.process?.env?.DEBUG_STATS === "1"
+  ) {
+    const sortedRaw = [...rawDiameters].sort((a, b) => a - b);
+    const p = (q: number) =>
+      sortedRaw.length > 0 ? Math.round(percentile(sortedRaw, q)) : 0;
+    console.log(
+      `[stats] raw contours=${numContours} ` +
+        `(P5=${p(0.05)} P25=${p(0.25)} P50=${p(0.5)} ` +
+        `P75=${p(0.75)} P95=${p(0.95)} P99=${p(0.99)} max=${Math.round(sortedRaw[sortedRaw.length - 1] ?? 0)}μm image-space) | ` +
+        `filtered: <${MIN_PARTICLE_DIAMETER_UM}μm noise=${belowMinCount} ` +
+        `(${((belowMinCount / numContours) * 100).toFixed(1)}%), ` +
+        `>${MAX_PARTICLE_DIAMETER_UM}μm bg=${aboveMaxCount} | ` +
+        `candidates=${candidates.length} (tempD50=${Math.round(tempD50)}μm, ` +
+        `clumpThreshold=${Math.round(clumpThresholdUm)}μm) | ` +
+        `clumps=${clumpCount} (${clumpAreaRatio.toFixed(1)}% area) | ` +
+        `final=${diameters.length} particles`,
+    );
+  }
+
   return {
     d10,
     d50,
@@ -98,6 +190,11 @@ export function computeStats(
     particleCount: diameters.length,
     totalAreaMm2,
     diameters,
+    clumps: {
+      count: clumpCount,
+      totalAreaMm2: clumpAreaMm2,
+      areaRatio: clumpAreaRatio,
+    },
   };
 }
 
@@ -116,4 +213,10 @@ export function percentile(sorted: number[], p: number): number {
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
 }
 
-export const _internal = { MIN_PARTICLE_DIAMETER_UM, FINES_THRESHOLD_UM };
+export const _internal = {
+  MIN_PARTICLE_DIAMETER_UM,
+  FINES_THRESHOLD_UM,
+  MAX_PARTICLE_DIAMETER_UM,
+  CLUMP_MIN_DIAMETER_UM,
+  CLUMP_MEDIAN_MULTIPLIER,
+};

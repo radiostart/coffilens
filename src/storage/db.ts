@@ -1,7 +1,7 @@
 /**
  * IndexedDB 스키마 + 초기화.
  *
- * v1: records store + timestamp/tool 인덱스.
+ * v1: records store + timestamp/coinType 인덱스.
  * 향후 마이그레이션은 onupgradeneeded 의 oldVersion 분기로.
  */
 
@@ -13,7 +13,6 @@ export interface RecordEntity {
   id: string;
   /** Date.now() — 정렬/인덱싱 기준 */
   timestamp: number;
-  tool: string;
   /** JPEG q=0.7, ~50KB. lazy load (listRecordsMeta 에서 제외). */
   thumbnail: Blob;
   d50: number;
@@ -48,7 +47,7 @@ export function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_RECORDS)) {
         const store = db.createObjectStore(STORE_RECORDS, { keyPath: "id" });
         store.createIndex("timestamp", "timestamp", { unique: false });
-        store.createIndex("tool", "tool", { unique: false });
+        store.createIndex("coinType", "coinType", { unique: false });
       }
     };
   });

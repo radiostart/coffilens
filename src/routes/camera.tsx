@@ -22,8 +22,16 @@ export function CameraRoute() {
     useState<CameraPermissionState>("prompt");
   const [, setLocation] = useLocation();
   const setFrame = useMeasurementStore((s) => s.setFrame);
+  const coinType = useMeasurementStore((s) => s.coinType);
+
+  // coinType 미설정 상태에서 /camera 직접 진입 → /coin-select 로 redirect
+  // (예: 옛 URL 잔존, 또는 HMR 이후 navigation 상태가 stale 한 경우)
+  useEffect(() => {
+    if (!coinType) setLocation("/coin-select");
+  }, [coinType, setLocation]);
 
   useEffect(() => {
+    if (!coinType) return;
     let cancelled = false;
     void lockPortraitOrientation();
 
@@ -56,10 +64,51 @@ export function CameraRoute() {
   }, []);
 
   function handleCapture() {
-    if (!videoRef.current) return;
-    const canvas = captureFrame(videoRef.current);
+    const v = videoRef.current;
+    if (!v) {
+      console.warn("[camera] handleCapture: videoRef.current is null");
+      return;
+    }
+    console.log("[camera] handleCapture", {
+      videoWidth: v.videoWidth,
+      videoHeight: v.videoHeight,
+      readyState: v.readyState,
+      paused: v.paused,
+      permission,
+    });
+    if (v.videoWidth === 0 || v.videoHeight === 0) {
+      console.warn("[camera] video not ready — try video.play()");
+      void v.play().catch((e) => console.error("[camera] play failed", e));
+      return;
+    }
+    const canvas = captureFrame(v);
     setFrame(canvas);
-    setLocation("/analyzing");
+    setLocation("/coin-locate");
+  }
+
+  // 갤러리에서 이미지 선택 — 카메라 셔터와 동등한 first-class 진입점.
+  // 사용자가 미리 촬영한 사진으로 측정하거나 회귀 테스트할 때 사용.
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    console.log(`[camera] gallery upload: ${file.name} (${file.size} bytes)`);
+    try {
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("2d context unavailable");
+      ctx.drawImage(bitmap, 0, 0);
+      bitmap.close?.();
+      console.log(
+        `[camera] gallery upload canvas: ${canvas.width}×${canvas.height}`,
+      );
+      setFrame(canvas);
+      setLocation("/coin-locate");
+    } catch (err) {
+      console.error("[camera] gallery upload failed", err);
+    }
   }
 
   if (permission === "denied") return <PermissionDeniedScreen />;
@@ -78,6 +127,10 @@ export function CameraRoute() {
         />
         <CoinOverlay />
         <div className="camera-controls">
+          {/* 좌측 placeholder — 시각적 균형용 (셔터 정중앙 유지) */}
+          <span className="camera-control-spacer" aria-hidden="true" />
+
+          {/* 메인 셔터 */}
           <button
             type="button"
             className="capture-button"
@@ -87,6 +140,30 @@ export function CameraRoute() {
           >
             <span className="capture-button-inner" aria-hidden="true" />
           </button>
+
+          {/* 갤러리 업로드 (셔터 우측, 동등한 first-class 모드) */}
+          <label className="gallery-button" aria-label="갤러리에서 이미지 선택">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleFileUpload}
+            />
+            <svg
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
+          </label>
         </div>
       </div>
     </>

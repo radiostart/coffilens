@@ -38,13 +38,17 @@ describe("loadOpenCV", () => {
 
   it("AbortSignal 으로 즉시 cancel", async () => {
     const ac = new AbortController();
+    // 실제 fetch 는 signal.addEventListener('abort') 로 reject — 동일하게 모방
     vi.stubGlobal(
       "fetch",
       vi.fn(
-        () =>
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("never")), 1000),
-          ),
+        (_url: string, init?: { signal?: AbortSignal }) =>
+          new Promise((_, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("aborted", "AbortError"));
+            });
+            setTimeout(() => reject(new Error("never")), 1000);
+          }),
       ),
     );
 

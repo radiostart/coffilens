@@ -33,7 +33,6 @@ afterEach(async () => {
 
 function fakeRecordInput(overrides: Partial<Parameters<typeof saveRecord>[0]> = {}) {
   return {
-    tool: "v60",
     thumbnail: new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" }),
     d50: 720,
     d10: 480,

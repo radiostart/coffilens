@@ -46,6 +46,19 @@ fixtures/
 }
 ```
 
+## tune-pipeline 스크립트 (2026-05-02)
+
+새 fixture 추가 후 파라미터 튜닝 시 `scripts/tune-pipeline.ts` 사용
+(jsdom + sharp + 실 OpenCV.js). 회귀 테스트는 `tests/opencv/regression-*.test.ts`
+의 `RUN_REAL_OPENCV=1` 게이트 패턴 따름.
+
+```sh
+export PATH=/Users/jay-p/.nvm/versions/node/v24.15.0/bin:$PATH
+npx tsx scripts/tune-pipeline.ts                    # 기본 fixtures/test-500-fine.jpg
+npx tsx scripts/tune-pipeline.ts fixtures/foo.jpg   # 다른 fixture
+RUN_REAL_OPENCV=1 npm test -- regression-500-fine    # 회귀 테스트
+```
+
 ## 디자인 spec
 
 전체 fixture 전략: `../../Tosss-in-app/docs/superpowers/specs/2026-05-01-f00-fixture-strategy-design.md`
