@@ -62,13 +62,18 @@ const FINES_THRESHOLD_UM = 300;
 const MAX_PARTICLE_DIAMETER_UM = 15000;
 
 // 클럼프 (덩어리) 분리 임계 — 통계 오염 방지.
-// tuned 2026-05-02 for fine grind 500원 fixture, see fixtures/manifest.json
+// tuned 2026-05-02 (re-tuned 2026-05-02 with VS3 4-anchor sieve fixtures).
 // 분쇄가 안 된 덩어리, 추출 후 압착된 퍽 잔여물 등 "정상 입자" 가 아닌 outlier.
-// 양쪽 조건 만족 시 클럼프로 분류 (false positive 최소화):
-//   1. 절대 크기: 직경 > 2mm (정상 분쇄 최대 ~1.5mm 대비 충분히 큼)
-//   2. 상대 크기: 중앙값(D50) 의 4배 초과 (분포 자체가 굵을 때도 정상 입자는 4배 이내)
+//
+// 정책: French Press (가장 굵은 표준 분쇄도) 의 최대 단일 입자 (~1500μm sieve,
+// image-space ~2000μm 까지 buffer 포함) 초과는 모두 응집으로 간주.
+// 사용자 지시 "프랜치 프레스 용 이상 사이즈로 측정된 값은 제외".
+//
+// 이전 multiplier 방식 (D50×4) 은 5.1 espresso 사진에서 양성 피드백 루프 발생:
+// 응집이 D50 을 부풀림 → threshold 도 부풀어 → 응집이 살아남음. 절대 cap 으로 차단.
+//
+// MAX_PARTICLE_DIAMETER_UM (15mm) 은 배경(가장자리, 그림자) 필터로 별개 유지.
 const CLUMP_MIN_DIAMETER_UM = 2000;
-const CLUMP_MEDIAN_MULTIPLIER = 4;
 
 export function computeStats(
   contours: CvMatVector,
@@ -113,13 +118,11 @@ export function computeStats(
     throw new Error("computeStats: 입자 0개 (필터 후)");
   }
 
-  // 2단계: 임시 D50 계산 → 클럼프 임계 결정.
+  // 2단계: 클럼프 임계 결정 — 절대 cap (CLUMP_MIN_DIAMETER_UM).
+  // tempD50 은 diagnostic 출력용으로만 계산.
   const tempSorted = candidates.map((c) => c.diameterUm).sort((a, b) => a - b);
   const tempD50 = percentile(tempSorted, 0.5);
-  const clumpThresholdUm = Math.max(
-    CLUMP_MIN_DIAMETER_UM,
-    tempD50 * CLUMP_MEDIAN_MULTIPLIER,
-  );
+  const clumpThresholdUm = CLUMP_MIN_DIAMETER_UM;
 
   // 3단계: 클럼프 분리. 정상 입자 통계와 분리 보고.
   const diameters: number[] = [];
@@ -218,5 +221,4 @@ export const _internal = {
   FINES_THRESHOLD_UM,
   MAX_PARTICLE_DIAMETER_UM,
   CLUMP_MIN_DIAMETER_UM,
-  CLUMP_MEDIAN_MULTIPLIER,
 };

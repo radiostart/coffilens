@@ -4,7 +4,7 @@
  * **왜 필요한가**
  *
  * 등가 원형 직경 (equivalent circular diameter) 으로 측정한 image-based
- * 직경은 sieve 분급 직경보다 systematic 하게 작게 나온다 (~ 0.4 배). 원인:
+ * 직경은 sieve 분급 직경보다 systematic 하게 작게 나온다 (~ 0.3 배). 원인:
  *  1. 입자가 평탄하게 누워서 촬영됨 → 가장 큰 단면만 보임
  *  2. Adaptive threshold over-segmentation: 큰 입자가 여러 fragment 로 쪼개짐
  *  3. 등가 원형 가정 자체의 underestimation (각진 입자 → 면적 환산 직경 < 실제 길이)
@@ -23,16 +23,32 @@
  * 사용자/그라인더별 임계값 튜닝은 이 layer 에서만 일어나야 한다. 가이드
  * 임계값은 외부 표준을 따르는 게 원칙 (우리가 정할 문제가 아님).
  *
- * **Anchor (잠정)**
+ * **Anchor — Varia VS3 + Hyperhoba burr @ 11 (pour-over 우선 정책)**
  *
- * Varia VS3 + Hyperhoba burr @ 11.5
- *   - sieve target: V60 grind 표준 ≈ 700μm (range 600~800)
- *   - image measured: D50 ≈ 249μm (test-vs3-100.jpg, 2026-05-02)
- *   - ratio: 700 / 249 ≈ 2.81 → 2.8 으로 round
+ * 4-anchor sieve fixture 측정 결과 (2026-05-02, image-space μm, post clump-cap):
+ *   - 5.1 espresso 끝자락 : image D50 = 313 (mmPerPx 0.068)
+ *   - 9   moka pot       : image D50 = 302 (mmPerPx 0.069)
+ *   - 11  pour-over      : image D50 = 198 (mmPerPx 0.045)  ← anchor
+ *   - 13  french press   : image D50 = 200 (mmPerPx 0.061)
  *
- * **TODO** 사용자 sieve 분급된 ground-truth fixture 4종 (espresso/모카포트/
- * 핸드드립/프렌치프레스) 도착 후 anchor 4점 평균으로 정확히 재보정. 현재 1점
- * anchor 라 grind range 양 끝 (espresso, coarse) 의 정확도는 검증 필요.
+ * 4-anchor 결과 분석: image D50 가 사용자 의도와 monotonic 하지 않음. 원인은
+ * camera distance (mmPerPixel) 에 따른 sub-pixel particle 검출 한계 — fine
+ * grind 에서 미세 입자가 픽셀 단위 미만이면 MIN_PARTICLE_DIAMETER_UM (100μm)
+ * 필터에 걸려 분포 중앙이 위로 편향된다. 단일 ratio 로 모든 grind 영역을
+ * 정확히 보정할 수 없는 fundamental 한계.
+ *
+ * **정책: 핸드드립 우선 anchor (사용자 결정 2026-05-02)**
+ *  - 핸드드립이 가장 일반적 추출법 → 정확도 우선
+ *  - Setting 11 (mmPerPx 0.045, 가장 가까운 촬영) image D50 = 198μm
+ *  - V60 표준 sieve D50 = 600~800μm, mid 700μm
+ *  - ratio = 700 / 198 = **3.54** → 3.3 으로 보수적 round
+ *  - 다른 grind 영역은 brewing-guide 의 3-카테고리 단순화 (fine/medium/coarse) 와
+ *    measurement confidence 표시로 대응 (camera distance 가까울수록 신뢰도 ↑)
+ *
+ * **Phase 2 TODO**
+ *  - 사용자 sieve 분급된 ground-truth fixture 로 정밀 보정
+ *  - mmPerPixel-aware 적응형 ratio (선형 회귀)
+ *  - Sub-pixel 입자 추정 (해상도 한계 극복)
  */
 
 import type { ParticleStats } from "./statistics";
@@ -40,9 +56,10 @@ import type { ParticleStats } from "./statistics";
 /**
  * Image-measured 직경에 곱하면 sieve-equivalent 직경이 나오는 비율.
  *
- * 잠정값 2.8 — vs3-100 anchor 1점 기준. fixture 도착 후 fine-tune 예정.
+ * 3.3 — Setting 11 (V60 pour-over, 가장 정확한 측정 조건) anchor.
+ * 핸드드립 우선 정책 (2026-05-02). 다른 grind 영역은 fundamental 한계 인정.
  */
-export const IMAGE_TO_SIEVE_RATIO = 2.8;
+export const IMAGE_TO_SIEVE_RATIO = 3.3;
 
 /**
  * computeStats 출력에 image → sieve 변환 적용.

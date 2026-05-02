@@ -85,9 +85,10 @@ describe("runPipeline — 정상 흐름", () => {
       onProgress,
     });
 
-    // pipeline 이 computeStats 출력에 image→sieve calibration (×2.8) 적용.
-    // mock d50=720 (image-space) → 720 × 2.8 = 2016 (sieve-equivalent).
-    expect(result.stats.d50).toBeCloseTo(720 * 2.8, 5);
+    // pipeline 이 computeStats 출력에 image→sieve calibration (×3.3) 적용.
+    // mock d50=720 (image-space) → 720 × 3.3 = 2376 (sieve-equivalent).
+    // ratio 3.3: 2026-05-02 pour-over anchor (Setting 11 V60 fixture) 재보정.
+    expect(result.stats.d50).toBeCloseTo(720 * 3.3, 5);
     expect(result.coin.coinType).toBe("500");
     expect(result.confidence.score).toBe(8);
     expect(result.durationMs).toBeGreaterThanOrEqual(0);

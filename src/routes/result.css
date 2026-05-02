@@ -224,6 +224,20 @@
   gap: var(--space-sm);
 }
 
+/* 3-카테고리 분쇄도 라벨 (제목 옆 인라인) */
+.result-grind-label {
+  display: inline-block;
+  margin-left: var(--space-xs);
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft, var(--color-bg-page));
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  vertical-align: middle;
+}
+
 .result-guide-row {
   display: flex;
   gap: var(--space-sm);

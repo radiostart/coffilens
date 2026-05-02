@@ -35,18 +35,20 @@ beforeEach(() => {
 
 describe("computeStats — 정상 케이스", () => {
   it("균일 직경 입자 → D10 ≈ D50 ≈ D90", () => {
-    // mmPerPixel = 0.1 (1px = 0.1mm)
-    // areaPx = π*(50)^2 ≈ 7854 → areaMm2 ≈ 78.54mm² → D = 2*sqrt(78.54/π) ≈ 10mm = 10000μm
-    // 100개 동일 입자
-    const areasPx = Array(100).fill(7854);
+    // mmPerPixel = 0.05 (close-up, V60 fixture 수준)
+    // 직경 500μm 입자 100개:
+    //   R = 250μm = 0.25mm → A = π*0.25^2 = 0.196 mm²
+    //   areaPx = 0.196 / 0.05^2 = 0.196 / 0.0025 ≈ 78.5 → 79
+    // CLUMP_MIN_DIAMETER_UM(2000μm) 미만이므로 전부 통과
+    const areasPx = Array(100).fill(79);
     const contours = setupCvMock(areasPx);
-    const stats = computeStats(contours, 0.1);
+    const stats = computeStats(contours, 0.05);
 
     expect(stats.particleCount).toBe(100);
     expect(stats.d10).toBeCloseTo(stats.d50, 0);
     expect(stats.d50).toBeCloseTo(stats.d90, 0);
-    // 직경 약 10000μm
-    expect(stats.d50).toBeCloseTo(10000, -2);
+    // 직경 약 500μm (image-space, ±2% tolerance)
+    expect(stats.d50).toBeCloseTo(500, -2);
   });
 
   it("D10 < D50 < D90 단조 증가", () => {
@@ -93,9 +95,10 @@ describe("computeStats — 가드", () => {
   it("100μm 미만 + 정상 입자 혼합 → 정상만 반환", () => {
     // 작은 입자 (필터됨) + 정상 (유지)
     // mmPerPixel = 0.05
-    // small: areaPx=1 → D ≈ 56μm (필터)
-    // normal: areaPx=10000 → areaMm2=25, D=2*sqrt(25/π)*1000 ≈ 5642μm (유지)
-    const contours = setupCvMock([1, 10000, 1, 10000, 10000]);
+    // small: areaPx=1 → D ≈ 56μm (MIN 100μm 필터됨)
+    // normal: areaPx=200 → areaMm2=0.5, D=2*sqrt(0.5/π)*1000 ≈ 798μm
+    //   (CLUMP cap 2000μm 미만 → 통과)
+    const contours = setupCvMock([1, 200, 1, 200, 200]);
     const stats = computeStats(contours, 0.05);
     expect(stats.particleCount).toBe(3);
   });

@@ -276,13 +276,17 @@ export function ResultRoute() {
             d50: result.stats.d50,
             uniformity: result.stats.uniformity,
             clumpAreaRatio: result.stats.clumps.areaRatio,
+            mmPerPixel: result.coin.mmPerPixel,
           });
           return (
             <section
               className="result-brewing-guide"
               aria-label="추출 가이드"
             >
-              <h2 className="text-h3 result-section-title">☕ 어떻게 추출할까요?</h2>
+              <h2 className="text-h3 result-section-title">
+                ☕ 어떻게 추출할까요?{" "}
+                <span className="result-grind-label">{guide.grindLabel}</span>
+              </h2>
               <div className="result-guide-row">
                 <span className="result-guide-tag tag-primary">추천</span>
                 <span className="text-body">{guide.primary.join(" · ")}</span>

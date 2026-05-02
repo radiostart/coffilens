@@ -112,8 +112,8 @@ export async function runPipeline(
       const rawStats = computeStats(segmentation.contours, coin.mmPerPixel);
       // 2) image → sieve calibration (D-value/diameters[] 만 변환).
       //    brewing-guide.ts 가 sieve 표준 임계값을 그대로 사용할 수 있도록
-      //    layer 분리. anchor: vs3-100 (V60 grind, ratio 2.8). 상세는
-      //    src/opencv/calibration.ts doc-comment 참조.
+      //    layer 분리. anchor: Setting 11 V60 pour-over (ratio 3.3, 2026-05-02
+      //    재보정). 상세는 src/opencv/calibration.ts doc-comment 참조.
       stats = applyImageToSieveCalibration(rawStats);
     } catch {
       // computeStats 의 빈 배열 throw → no_particles 로 변환

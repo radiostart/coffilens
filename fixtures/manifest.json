@@ -77,6 +77,143 @@
         "separated_coin": { "radiusPx": 138, "center": [347, 327], "mean": 202, "stddev": 40 }
       },
       "notes": "동전 2개 (100원 + 500원) 동시 촬영. coinType=500 / coinType=100 둘 다 multi_coin 으로 정상 reject. 기대 동작 ✓"
+    },
+    {
+      "file": "test-vs3-051.jpg",
+      "kind": "calibration_anchor",
+      "coin": "500",
+      "grinder": "Varia VS3 (2nd Gen) + Hyperhoba burr @ 5.1",
+      "grind_label": "user_intent_espresso_endpoint",
+      "user_intent_category": "에스프레소 (끝자락)",
+      "external_reference": {
+        "source": "Varia VS3 Gen 2 grind range 170~1400μm, espresso setting 3~5",
+        "estimated_sieve_d50_um": 380,
+        "estimated_range_um": [300, 450],
+        "note": "setting 5.1 은 espresso 영역의 우측 끝 — 모카포트 경계 부근"
+      },
+      "expected_brewing_category_standard_sieve": "350-500 = 모카포트 영역 (사용자 의도 '에스프레소 끝자락' 과 표준 임계값의 경계 케이스)",
+      "ground_truth_d50_um_sieve": null,
+      "tolerance_um": null,
+      "observed_2026_05_02": {
+        "version": "re-shot",
+        "coinHint_landscape_buffer": [0.85, 0.78],
+        "mmPerPixel": 0.068,
+        "particleCount": 2981,
+        "image_d50_um": 313,
+        "image_d90_um": 755,
+        "sieve_d50_um_with_ratio_3_3": 1033,
+        "uniformity_image": 5.67,
+        "fines_percent": 7.59,
+        "clumps_count": 16,
+        "clumps_area_ratio": 15.6,
+        "predicted_3cat_label": "거침",
+        "predicted_3cat_label_user_intent": "미세",
+        "match": false,
+        "reason_for_mismatch": "5.1 은 espresso 영역 — image 측정에서 미세 입자 일부 sub-pixel 한계로 누락. mmPerPx 0.068 (medium confidence). 더 가까이 (mmPerPx ≤ 0.05) 촬영해도 espresso fines 측정은 fundamental 한계 존재."
+      },
+      "notes": "초안 (mmPerPx 0.128) 너무 멀리서 촬영 → 다시 촬영 (mmPerPx 0.068). 사용자 의도 '에스프레소' vs predicted '거침' 분류 mismatch. mmPerPixel 기반 confidence 'medium' 표시 + 더 가까이 촬영 권장."
+    },
+    {
+      "file": "test-vs3-09.jpg",
+      "kind": "calibration_anchor",
+      "coin": "500",
+      "grinder": "Varia VS3 (2nd Gen) + Hyperhoba burr @ 9",
+      "grind_label": "user_intent_moka",
+      "user_intent_category": "모카포트 (추정)",
+      "external_reference": {
+        "source": "Varia VS3 Gen 2 — pour-over setting 9~11 의 시작",
+        "estimated_sieve_d50_um": 530,
+        "estimated_range_um": [450, 600],
+        "note": "setting 9 는 pour-over 시작 영역 — 모카포트~aeropress 경계"
+      },
+      "expected_brewing_category_standard_sieve": "500-800 = 핸드드립 영역 (사용자 의도 '모카포트' 와 차이 가능)",
+      "ground_truth_d50_um_sieve": null,
+      "tolerance_um": null,
+      "observed_2026_05_02": {
+        "coinHint_landscape_buffer": [0.88, 0.22],
+        "mmPerPixel": 0.069,
+        "particleCount": 2261,
+        "image_d50_um": 302,
+        "image_d90_um": 790,
+        "sieve_d50_um_with_ratio_3_3": 996,
+        "uniformity_image": 5.86,
+        "fines_percent": 8.43,
+        "clumps_count": 7,
+        "clumps_area_ratio": 7.6,
+        "predicted_3cat_label": "거침",
+        "predicted_3cat_label_user_intent": "미세",
+        "match": false,
+        "reason_for_mismatch": "사용자 의도 '모카포트' = 미세, 측정 결과 996μm = 거침. mmPerPx 0.069 (medium) — 미세 입자 해상도 부족이 fine grind 측정 편향. confidence 'medium' 표시."
+      },
+      "notes": "사용자 의도 '모카포트' vs predicted '거침' mismatch. 5.1 과 비슷한 한계 — fine grind 측정 시 sub-pixel 제약."
+    },
+    {
+      "file": "test-vs3-11.jpg",
+      "kind": "calibration_anchor_primary",
+      "coin": "500",
+      "grinder": "Varia VS3 (2nd Gen) + Hyperhoba burr @ 11",
+      "grind_label": "user_intent_pour_over",
+      "user_intent_category": "핸드드립",
+      "external_reference": {
+        "source": "Varia VS3 Gen 2 — pour-over setting 9~11 의 끝, V60 표준",
+        "estimated_sieve_d50_um": 700,
+        "estimated_range_um": [600, 800],
+        "note": "setting 11 은 pour-over 영역의 표준 (V60 적정). IMAGE_TO_SIEVE_RATIO 의 PRIMARY ANCHOR."
+      },
+      "expected_brewing_category_standard_sieve": "500-900 = 중간 (핸드드립) ✓ (사용자 의도 일치)",
+      "ground_truth_d50_um_sieve": null,
+      "tolerance_um": null,
+      "observed_2026_05_02": {
+        "coinHint_landscape_buffer": [0.90, 0.20],
+        "mmPerPixel": 0.045,
+        "particleCount": 616,
+        "image_d50_um": 198,
+        "image_d90_um": 448,
+        "sieve_d50_um_with_ratio_3_3": 653,
+        "uniformity_image": 3.99,
+        "fines_percent": 27.81,
+        "clumps_count": 0,
+        "clumps_area_ratio": 0.0,
+        "predicted_3cat_label": "중간",
+        "predicted_3cat_label_user_intent": "중간",
+        "match": true,
+        "anchor_role": "PRIMARY — IMAGE_TO_SIEVE_RATIO=3.3 = 700/198 으로 산정. mmPerPx 0.045 = high confidence."
+      },
+      "notes": "이 fixture 가 IMAGE_TO_SIEVE_RATIO PRIMARY ANCHOR. mmPerPx 0.045 가 가장 가까운 촬영 → 미세 입자까지 검출 정확. predicted '중간' = 사용자 의도 '핸드드립' 일치 ✓"
+    },
+    {
+      "file": "test-vs3-13.jpg",
+      "kind": "calibration_anchor",
+      "coin": "500",
+      "grinder": "Varia VS3 (2nd Gen) + Hyperhoba burr @ 13",
+      "grind_label": "user_intent_french_press",
+      "user_intent_category": "프렌치프레스 (추정)",
+      "external_reference": {
+        "source": "Varia VS3 Gen 2 — pour-over (9~11) 와 cold brew (~16) 사이",
+        "estimated_sieve_d50_um": 900,
+        "estimated_range_um": [800, 1000],
+        "note": "setting 13 은 medium-coarse — 프렌치프레스 영역 시작"
+      },
+      "expected_brewing_category_standard_sieve": "900+ = 거침 (프렌치프레스/콜드브루) ✓ (사용자 의도 일치)",
+      "ground_truth_d50_um_sieve": null,
+      "tolerance_um": null,
+      "observed_2026_05_02": {
+        "coinHint_landscape_buffer": [0.92, 0.22],
+        "mmPerPixel": 0.061,
+        "particleCount": 1276,
+        "image_d50_um": 200,
+        "image_d90_um": 534,
+        "sieve_d50_um_with_ratio_3_3": 660,
+        "uniformity_image": 4.50,
+        "fines_percent": 22.74,
+        "clumps_count": 0,
+        "clumps_area_ratio": 0.0,
+        "predicted_3cat_label": "중간",
+        "predicted_3cat_label_user_intent": "거침",
+        "match": false,
+        "reason_for_mismatch": "사용자 의도 '프렌치프레스' = 거침, 측정 660μm = 중간. mmPerPx 0.061 (medium confidence). 실제 입자가 큰데도 image D50 이 11과 비슷 — 측정 한계일 수도, 실제로 13 이 french press 가 아닌 medium-coarse pour-over 일 수도 있음 (VS3 cold brew = ~16 이므로 13 은 boundary)."
+      },
+      "notes": "사용자 의도 '프렌치프레스' vs predicted '중간' mismatch. VS3 grind chart 상 setting 13 은 french press 시작 영역이지만 V60 끝과 boundary. 측정 결과가 boundary 의 V60 쪽으로 분류된 것은 합리적 — 사용자 의도가 의도적으로 fine-side french press 일 수 있음."
     }
   ],
   "qc_session_2026_05_02": {
@@ -95,6 +232,58 @@
     },
     "multi_coin_check": "PASS (count 2 with both coinType paths)",
     "code_health": "typecheck pass / 117 tests pass / lint clean"
+  },
+  "calibration_2026_05_02_revision_pour_over_anchor": {
+    "context": "VS3 4-anchor sieve fixture (5.1 espresso, 9 moka, 11 pour-over, 13 french press) 측정 후 단일 ratio 한계 발견. 사용자 결정으로 핸드드립 우선 정책 채택.",
+    "key_findings": {
+      "image_d50_does_not_correlate_with_user_intent": "image D50 ordering: 11(198) ≈ 13(200) < 9(302) ≈ 5.1(313). 사용자 intent ordering 5.1 < 9 < 11 < 13 과 단조 관계 없음.",
+      "root_cause_camera_distance": "mmPerPx 0.045~0.128 차이 (3배). fine grind (espresso) 측정 시 미세 입자가 sub-pixel 한계로 MIN_PARTICLE_DIAMETER_UM(100μm) 필터에 걸려 누락. 분포 중앙이 위로 편향.",
+      "single_ratio_impossible": "image→sieve ratio 가 5.1=1.21 → 9=1.75 → 11=3.54 → 13=4.50 로 단조 증가. 단일 multiplier 로 4-anchor 모두 정확 보정 불가."
+    },
+    "decisions_2026_05_02": {
+      "1_clump_filter_hard_cap": {
+        "what": "CLUMP_MIN_DIAMETER_UM 단독 사용 (이전 D50×4 multiplier 폐지)",
+        "why": "사용자 지시 '프랜치 프레스 용 이상 사이즈 제외'. multiplier 방식이 양성 피드백 루프 (응집이 D50 부풀림 → threshold 도 부풀림 → 응집 살아남음). 절대 cap 으로 차단.",
+        "value_um_image_space": 2000,
+        "effect": "5.1 fixture 에서 89 clumps 제거 (35.7% area). max particle 5924 → <2000."
+      },
+      "2_calibration_ratio_pour_over_anchor": {
+        "what": "IMAGE_TO_SIEVE_RATIO 2.8 → 3.3 변경",
+        "why": "사용자 결정: 핸드드립이 가장 일반적 추출법 → 정확도 우선. Setting 11 (mmPerPx 0.045 = 가장 정확) image D50=198 / V60 표준 700μm = 3.54 → 3.3 보수적 round.",
+        "trade_off": "5.1, 9, 13 의 mismatch 받아들임. fine grind 측정은 fundamental 한계로 confidence 표시로 대응."
+      },
+      "3_brewing_guide_3_categories": {
+        "what": "4-카테고리 → 3-카테고리 단순화",
+        "thresholds_sieve_um": {
+          "fine_below_500": "에스프레소·모카포트",
+          "medium_500_to_900": "핸드드립",
+          "coarse_above_900": "프렌치프레스·콜드브루"
+        },
+        "why": "측정 ±200μm 편향 가능. 4-카테고리 (350/500/800) 는 boundary 케이스 mis-classification 빈번. 3-카테고리 + 800→900 buffer 로 robust.",
+        "previous_4cat": "<350/350-500/500-800/800+ 는 Hoffmann/SCA 표준이지만 우리 측정 정확도가 그 해상도 미달."
+      },
+      "4_measurement_confidence_indicator": {
+        "what": "mmPerPixel 기반 high/medium/low 신뢰도 라벨",
+        "thresholds": {
+          "high_le_0_05": "Setting 11 anchor 수준 — fine grind 까지 정확",
+          "medium_le_0_07": "보통 — fine grind 측정 시 일부 sub-pixel 누락",
+          "low_gt_0_07": "멀리 촬영 — 가까이 다시 촬영 권장"
+        },
+        "ux_action": "low 시 '동전이 화면 30% 이상 차지하도록' 안내 caveat 추가."
+      }
+    },
+    "fixture_classification_after_revision": {
+      "test-vs3-051.jpg (espresso intent)": "image 313 → sieve 1033 → '거침' ❌ (intent '미세'). mmPerPx 0.068 medium confidence → caveat 표시.",
+      "test-vs3-09.jpg (moka intent)": "image 302 → sieve 996 → '거침' ❌ (intent '미세'). mmPerPx 0.069 medium → caveat.",
+      "test-vs3-11.jpg (pour-over intent)": "image 198 → sieve 653 → '중간' ✓ (PRIMARY ANCHOR). mmPerPx 0.045 high confidence.",
+      "test-vs3-13.jpg (french press intent)": "image 200 → sieve 660 → '중간' ❌ (intent '거침'). mmPerPx 0.061 medium. 실제 setting 13 이 V60 끝~french 시작 boundary 라 '중간' 분류도 합리적."
+    },
+    "phase_2_followups": [
+      "sieve 분급된 ground-truth fixture 제작 (≤500/500-1000/>1000μm 분리)",
+      "mmPerPixel-aware 적응형 ratio (선형 회귀: ratio = a + b*mmPerPx)",
+      "Sub-pixel 입자 추정 (fine grind 측정 한계 극복)",
+      "Phase 1 의 mismatch fixture 들 재촬영 + 측정 (0.045 mmPerPx 도달 가능 여부 검증)"
+    ]
   },
   "calibration_2026_05_02_brewing_guide": {
     "architecture": "layer 분리: measurement (statistics.ts pure image-space) → calibration (calibration.ts: image × IMAGE_TO_SIEVE_RATIO → sieve-equivalent) → guide (brewing-guide.ts: 표준 sieve 임계값). brewing-guide 임계값은 외부 표준 (Hoffmann/SCA/PDG) 그대로 — 우리가 결정/조정할 영역 X. 사용자/그라인더별 튜닝은 calibration layer 에서만.",
@@ -135,6 +324,15 @@
     ],
     "deferred": {
       "credit_card_reference": "ID-1 spec (85.6×53.98mm) 추가는 검토만 — 핵심 bias (segmentation 등가 원형 직경) 를 해결하지 못함. 새 detection pipeline (rectangle/contour) + UX 변경 (사각형 marker) + 프라이버시 가이드 (카드번호 가림) 모두 필요해 effort 대비 ROI 낮음. Phase 2+ 로 보류."
+    }
+  },
+  "phase2_calibration_completed_2026_05_02": {
+    "summary": "4-anchor sieve fixture 측정 완료. 결과 → calibration_2026_05_02_revision_pour_over_anchor 섹션 참조.",
+    "validation_question_answers": {
+      "Q1_setting_5_1_classification": "image D50 313 → sieve 1033 → '거침' (intent '미세' 와 mismatch). 원인: mmPerPx 0.068 측정 한계로 미세 입자 누락 → 분포 중앙 위로 편향.",
+      "Q2_setting_9_classification": "image D50 302 → sieve 996 → '거침' (intent '미세' 와 mismatch). 5.1 과 동일 한계.",
+      "Q3_setting_11_consistency_with_vs3_100": "vs3-11 image D50 198 (setting 11) vs vs3-100 image D50 249 (setting 11.5). |Δ|/mean = 23% > 15% target. 다른 사진/거리/조명 영향. 11 fixture 가 더 가까이 (mmPerPx 0.045) 촬영되어 measurement 가 더 정확.",
+      "Q4_ratio_grind_range_consistency": "ratio 가 5.1=1.21 → 13=4.50 으로 4배 차이. 단일 multiplier 한계 확인. 핸드드립 우선 정책으로 ratio 3.3 anchored on Setting 11 채택, 다른 영역은 confidence 표시로 대응."
     }
   },
   "filter_review_2026_05_02": {
