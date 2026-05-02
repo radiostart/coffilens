@@ -85,10 +85,11 @@ describe("runPipeline — 정상 흐름", () => {
       onProgress,
     });
 
-    // pipeline 이 computeStats 출력에 image→sieve calibration (×3.3) 적용.
-    // mock d50=720 (image-space) → 720 × 3.3 = 2376 (sieve-equivalent).
-    // ratio 3.3: 2026-05-02 pour-over anchor (Setting 11 V60 fixture) 재보정.
-    expect(result.stats.d50).toBeCloseTo(720 * 3.3, 5);
+    // pipeline 이 computeStats 출력에 image→sieve calibration (×1.7) 적용.
+    // mock d50=720 (image-space) → 720 × 1.7 = 1224 (sieve-equivalent).
+    // ratio 1.7: 2026-05-02 후속 수정 — tune-pipeline EXIF 버그 발견 후
+    // 브라우저 측정 (Setting 11 V60 fixture, real coin r=77) 으로 재보정.
+    expect(result.stats.d50).toBeCloseTo(720 * 1.7, 5);
     expect(result.coin.coinType).toBe("500");
     expect(result.confidence.score).toBe(8);
     expect(result.durationMs).toBeGreaterThanOrEqual(0);

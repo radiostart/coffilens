@@ -25,30 +25,35 @@
  *
  * **Anchor — Varia VS3 + Hyperhoba burr @ 11 (pour-over 우선 정책)**
  *
- * 4-anchor sieve fixture 측정 결과 (2026-05-02, image-space μm, post clump-cap):
- *   - 5.1 espresso 끝자락 : image D50 = 313 (mmPerPx 0.068)
- *   - 9   moka pot       : image D50 = 302 (mmPerPx 0.069)
- *   - 11  pour-over      : image D50 = 198 (mmPerPx 0.045)  ← anchor
- *   - 13  french press   : image D50 = 200 (mmPerPx 0.061)
+ * **2026-05-02 후속 수정**: tune-pipeline.ts EXIF 버그 발견. sharp.metadata()
+ * 가 pre-rotate 차원 반환 → resize cover-fit 으로 portrait 사진 상하단 잘림 →
+ * 코인 위치 잘려 HoughCircles false-positive (큰 phantom circle) 잡음 →
+ * mmPerPixel 부정확 (실제보다 작게 측정) → image D50 도 부정확.
  *
- * 4-anchor 결과 분석: image D50 가 사용자 의도와 monotonic 하지 않음. 원인은
- * camera distance (mmPerPixel) 에 따른 sub-pixel particle 검출 한계 — fine
- * grind 에서 미세 입자가 픽셀 단위 미만이면 MIN_PARTICLE_DIAMETER_UM (100μm)
- * 필터에 걸려 분포 중앙이 위로 편향된다. 단일 ratio 로 모든 grind 영역을
- * 정확히 보정할 수 없는 fundamental 한계.
+ * 브라우저 (real <img>+canvas, EXIF 정상 처리) 측정 결과로 재보정:
+ *
+ *   Setting 11 (V60 pour-over) — fixture test-vs3-11.jpg
+ *     - browser: coin r=77 (정확), mmPerPx = 0.172
+ *     - browser: image D50 ≈ 414μm
+ *     - sieve target: V60 표준 700μm
+ *     - ratio = 700 / 414 ≈ **1.69** → **1.7** 으로 round
+ *
+ * 이전 ratio 3.3 (구 tune-pipeline 의 r=298 false positive 기반) 은 invalid.
+ * 다른 fixture (5.1, 9, 13) 의 manifest observed 데이터도 동일 버그 영향 →
+ * Phase 2 에서 브라우저 측정으로 재검증 필요.
  *
  * **정책: 핸드드립 우선 anchor (사용자 결정 2026-05-02)**
  *  - 핸드드립이 가장 일반적 추출법 → 정확도 우선
- *  - Setting 11 (mmPerPx 0.045, 가장 가까운 촬영) image D50 = 198μm
- *  - V60 표준 sieve D50 = 600~800μm, mid 700μm
- *  - ratio = 700 / 198 = **3.54** → 3.3 으로 보수적 round
+ *  - Setting 11 (V60 pour-over) 브라우저 측정 anchor
  *  - 다른 grind 영역은 brewing-guide 의 3-카테고리 단순화 (fine/medium/coarse) 와
  *    measurement confidence 표시로 대응 (camera distance 가까울수록 신뢰도 ↑)
  *
  * **Phase 2 TODO**
  *  - 사용자 sieve 분급된 ground-truth fixture 로 정밀 보정
+ *  - 다른 setting (5.1, 9, 13) 브라우저 재측정으로 4-anchor 재구성
  *  - mmPerPixel-aware 적응형 ratio (선형 회귀)
  *  - Sub-pixel 입자 추정 (해상도 한계 극복)
+ *  - coin detection filter 완화 (|int-ext| 70 임계가 일부 동전 false reject)
  */
 
 import type { ParticleStats } from "./statistics";
@@ -56,10 +61,12 @@ import type { ParticleStats } from "./statistics";
 /**
  * Image-measured 직경에 곱하면 sieve-equivalent 직경이 나오는 비율.
  *
- * 3.3 — Setting 11 (V60 pour-over, 가장 정확한 측정 조건) anchor.
- * 핸드드립 우선 정책 (2026-05-02). 다른 grind 영역은 fundamental 한계 인정.
+ * 1.7 — Setting 11 (V60 pour-over) 브라우저 측정 anchor (2026-05-02 후속 수정).
+ * 핸드드립 우선 정책. 다른 grind 영역은 fundamental 한계 인정.
+ *
+ * 이전 3.3 은 tune-pipeline EXIF 버그로 인한 잘못된 측정값 기반 — 수정 후 폐기.
  */
-export const IMAGE_TO_SIEVE_RATIO = 3.3;
+export const IMAGE_TO_SIEVE_RATIO = 1.7;
 
 /**
  * computeStats 출력에 image → sieve 변환 적용.

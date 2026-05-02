@@ -343,15 +343,31 @@ export function ResultRoute() {
           </p>
         )}
         {!saved ? (
-          <button
-            type="button"
-            className="btn-primary result-save-cta"
-            onClick={() => {
-              void handleSave();
-            }}
-          >
-            측정 저장
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn-primary result-save-cta"
+              onClick={() => {
+                void handleSave();
+              }}
+            >
+              측정 저장
+            </button>
+            <button
+              type="button"
+              className="result-secondary"
+              onClick={() => setLocation("/camera")}
+            >
+              다시 촬영
+            </button>
+            <button
+              type="button"
+              className="result-secondary"
+              onClick={() => setLocation("/home")}
+            >
+              홈으로 (저장 안 함)
+            </button>
+          </>
         ) : (
           <>
             {savedAt !== null && (
@@ -368,6 +384,13 @@ export function ResultRoute() {
                 )}
               </p>
             )}
+            <button
+              type="button"
+              className="result-secondary"
+              onClick={() => setLocation("/camera")}
+            >
+              다시 촬영
+            </button>
             <button
               type="button"
               className="result-secondary"

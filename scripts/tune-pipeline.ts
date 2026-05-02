@@ -86,14 +86,29 @@ async function main() {
   dom.window.ImageData = ImageDataPolyfill;
 
   // 2. sharp 으로 이미지 디코딩 + 1280px 다운샘플 (EXIF 자동 회전 포함)
+  //
+  // **버그 수정 (2026-05-02 후속)**: sharp.metadata() 는 EXIF rotate 가 queued
+  // 되어 있어도 PRE-rotate 차원 반환. 이걸 resize 에 넘기면 cover-fit center crop
+  // 으로 portrait 사진의 상하단 (보통 동전 위치) 이 잘려나가 HoughCircles 가
+  // false-positive 코인을 잡음.
+  //
+  // 수정: EXIF orientation 5~8 (90°/270° 회전) 시 width/height swap 후 resize.
+  // browser 의 <img> + canvas 처리와 동일한 결과 얻기 위함.
   const image = sharp(fixturePath).rotate(); // EXIF 자동 회전
-  const meta = await image.metadata();
-  console.log(`[tune] source: ${meta.width}×${meta.height} (after EXIF rotate)`);
+  const rawMeta = await sharp(fixturePath).metadata(); // EXIF orientation 검사
+  const isRotatedQuarterTurn =
+    rawMeta.orientation !== undefined && rawMeta.orientation >= 5;
+  // post-rotate 차원: 5~8 은 90°/270° 회전이라 W/H swap.
+  const postW = isRotatedQuarterTurn ? rawMeta.height! : rawMeta.width!;
+  const postH = isRotatedQuarterTurn ? rawMeta.width! : rawMeta.height!;
+  console.log(
+    `[tune] source: ${rawMeta.width}×${rawMeta.height} → post-rotate ${postW}×${postH} (orientation=${rawMeta.orientation ?? 1})`,
+  );
 
-  const longEdge = Math.max(meta.width!, meta.height!);
+  const longEdge = Math.max(postW, postH);
   const scale = longEdge <= 1280 ? 1 : 1280 / longEdge;
-  const dstW = Math.round(meta.width! * scale);
-  const dstH = Math.round(meta.height! * scale);
+  const dstW = Math.round(postW * scale);
+  const dstH = Math.round(postH * scale);
   console.log(`[tune] downsample → ${dstW}×${dstH} (scale=${scale.toFixed(3)})`);
 
   const { data, info } = await image

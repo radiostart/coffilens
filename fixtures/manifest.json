@@ -233,6 +233,40 @@
     "multi_coin_check": "PASS (count 2 with both coinType paths)",
     "code_health": "typecheck pass / 117 tests pass / lint clean"
   },
+  "calibration_2026_05_02_revision_2_exif_bug_correction": {
+    "context": "Setting 11 fixture 브라우저 검증 시도에서 D50 1366μm sieve = 거침 분류 발견. fixture 측정값 (image D50 198 = sieve 653 = 중간) 과 모순. 원인 추적 결과 tune-pipeline.ts 의 EXIF 처리 버그 발견.",
+    "bug_root_cause": {
+      "file": "scripts/tune-pipeline.ts",
+      "issue": "sharp(file).rotate() 후 .metadata() 호출 시 PRE-rotate 차원 (4000×3000) 반환. 이걸 .resize(1280, 960) 에 넘기면 EXIF 적용된 portrait (3000×4000) 이 cover-fit 으로 center crop → 사진 상하단이 잘림. 코인이 보통 사진 하단에 있어 잘리고, HoughCircles 가 grounds pattern 의 phantom circle 을 false positive 로 잡음.",
+      "impact": "test-vs3-051/09/11/13.jpg 모든 fixture 측정값이 잘못된 mmPerPixel 기반 → image D50/D90 도 부정확. ratio 3.3 결정의 anchor 자체가 invalid."
+    },
+    "browser_measurement_truth": {
+      "fixture": "test-vs3-11.jpg (V60 pour-over, 사용자 1차 검증)",
+      "candidates_filtered": ["r=198 @ (455,592) phantom", "r=77 @ (723,1082) REAL"],
+      "user_tap_coinHint": "(720, 1082) → r=77 정확히 매칭",
+      "mmPerPixel_correct": 0.172,
+      "image_d50_um": 414,
+      "sieve_target_v60": 700,
+      "ratio_corrected": "700 / 414 ≈ 1.69 → 1.7"
+    },
+    "fixes_applied": [
+      "scripts/tune-pipeline.ts: EXIF orientation ≥5 검사 후 W/H swap 으로 post-rotate 차원 사용",
+      "src/opencv/calibration.ts: IMAGE_TO_SIEVE_RATIO 3.3 → 1.7",
+      "src/opencv/pipeline.ts: doc-comment ratio 1.7 표기",
+      "tests/opencv/pipeline.test.ts: 720 × 1.7 = 1224 expected"
+    ],
+    "remaining_uncertainties": [
+      "fixed tune-pipeline 으로 fixture 11 재측정 시 coin filter |int-ext| ≤ 70 가 real coin 을 false-reject (실측값 |Δ|=72, 임계 70). resize interpolation 차이로 브라우저는 |Δ|=59 통과. tune-pipeline 으로는 4 fixture 정확 재측정 어려움.",
+      "5.1, 9, 13 fixture 의 정확한 측정값은 브라우저 검증 필요. 사용자가 차후 검증 시 manifest observed_2026_05_02 의 mmPerPixel/image_d50 필드는 부정확 표시.",
+      "Phase 1 의 fixture-based 4-anchor 분석 결과 (mismatch ratio 1.21~4.50) 는 일부 measurement noise 포함 — Phase 2 에서 브라우저 데이터로 재분석 필요."
+    ],
+    "phase_2_priority": [
+      "production pipeline 의 coin filter 완화 검토 (|int-ext| 70 → 80? 또는 gradient 강도 가중치)",
+      "tune-pipeline 의 coin filter 도 동일 완화 시 4 fixture 재측정 가능",
+      "사용자 협조하에 5.1/9/13 도 브라우저로 측정 + manifest 갱신",
+      "ratio 1.7 가 다른 grind 영역에서도 합리적인지 검증"
+    ]
+  },
   "calibration_2026_05_02_revision_pour_over_anchor": {
     "context": "VS3 4-anchor sieve fixture (5.1 espresso, 9 moka, 11 pour-over, 13 french press) 측정 후 단일 ratio 한계 발견. 사용자 결정으로 핸드드립 우선 정책 채택.",
     "key_findings": {
