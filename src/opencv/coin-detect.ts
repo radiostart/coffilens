@@ -145,10 +145,17 @@ const COIN_MAX_STDDEV = 42;
 // tuned 2026-05-02 for VS3 fixture set, see fixtures/manifest.json
 const COIN_MAX_INTERIOR_EXTERIOR_DIFF = 70;
 
+// Strong gradient bypass — rim gradient 가 매우 강하면 (sharp metal edge) |int-ext|
+// 임계 우회. 그림자 진 동전 / 어두운 디자인 영역이 많은 코인 (학 그림 등) 은
+// |int-ext| 가 70 가까이 가지만, gradient 는 여전히 sharp (≥50).
+// 사용자 fixture 11 검증: r=80 with |int-ext|=73 (실패) gradient=66 (sharp) — 진짜 동전.
+// tuned 2026-05-02 (revision 4 — coin filter 완화).
+const COIN_GRADIENT_STRONG_BYPASS = 50;
+
 // Rim gradient strength 필터 — 진짜 동전 rim 은 sharp transition (metal→napkin) 로
 // gradient magnitude 가 큼. Napkin "구멍" (sparse coffee 사이) 은 명확한 edge 없어
 // gradient 약함. tuned 2026-05-02 for VS3 fixture set.
-//   진짜 동전: rim gradient ~25-50
+//   진짜 동전: rim gradient ~25-50+
 //   napkin 구멍/scattered coffee 가장자리: ~5-15
 const COIN_MIN_RIM_GRADIENT = 18;
 
@@ -357,7 +364,12 @@ export async function detectCoin(
       if (c.stddev > COIN_MAX_STDDEV) return false;
       // exterior ring 필터: 동전이면 외부도 napkin (밝음). interior - exterior 작음.
       // c.exterior === 999 (이미지 경계 벗어남) 이면 검증 skip — 통과시킴.
-      if (c.exterior !== 999) {
+      // STRONG GRADIENT BYPASS: rim gradient ≥ 50 이면 sharp metal edge 확정 →
+      // |int-ext| 임계 우회 (진짜 동전 false reject 방지).
+      if (
+        c.exterior !== 999 &&
+        c.rimGradient < COIN_GRADIENT_STRONG_BYPASS
+      ) {
         const diff = Math.abs(c.mean - c.exterior);
         if (diff > COIN_MAX_INTERIOR_EXTERIOR_DIFF) return false;
       }
@@ -366,7 +378,7 @@ export async function detectCoin(
       return true;
     });
     console.log(
-      `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}], stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
+      `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}], stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
     );
 
     if (coinCandidates.length === 0) {

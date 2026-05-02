@@ -46,11 +46,12 @@ export function downsampleImage(
   const canvas = document.createElement("canvas");
   canvas.width = dstW;
   canvas.height = dstH;
-  // willReadFrequently: OpenCV.js cv.imread() 가 내부적으로 getImageData()
-  // 여러 번 호출 (HoughCircles, threshold, morphology 등). 이 hint 없으면
-  // browser 가 GPU-backed canvas 로 만들어 readback 비용 큼. CPU-side buffer
-  // 로 바인딩되어 readback 빨라짐.
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  // NOTE: willReadFrequently:true 시도했으나 일부 브라우저에서 canvas
+  // 렌더링 path 변경 → 픽셀값 미세 차이 → HoughCircles 결과 변화 →
+  // coin filter edge case 영향 (실측: |int-ext| 59 → 73 으로 변동, 70 임계
+  // flip). 결정적 동작 우선 → 옵션 미사용. perf 경고는 차후 OpenCV
+  // 내부 canvas 처리 개선 시 함께 해결.
+  const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("downsampleImage: 2d context unavailable");
 
   ctx.drawImage(source, 0, 0, dstW, dstH);
