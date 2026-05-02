@@ -33,16 +33,13 @@ interface HistogramBin {
    */
   percentage: number;
   /**
-   * KDE (Kernel Density Estimation) 추세 — log-space Gaussian kernel.
-   * Line dataKey, 우측 Y축 (% scale).
-   * 분포 모양 (fines → peak → descending) 자연스럽게 가시화.
+   * 분포도 percentage — bar 와 동일 데이터의 line 표현. 우측 Y축.
+   * **count === percentage 와 1:1 매칭**: bar 가 높으면 line 높음, bar=0 이면 line=0.
    *
-   * **bin 의 count 가 0 이면 null** — Recharts 가 line 을 break 시킴.
-   * 사용자 보고: "입자 개수 0인데 선 그래프가 있다" — KDE 가 데이터 없는 구간
-   * 까지 smooth 하게 extrapolate 한 결과. 0-count bin 은 line 도 표시 X 로
-   * "데이터 없는 곳에 phantom line" 제거.
+   * 이전 KDE smoothing 시도 → phantom value (데이터 없는 곳 line 표시) 문제.
+   * 직접 percentage 사용으로 해결. Recharts monotone 보간으로 점 사이 자연스러운 곡선.
    */
-  trend: number | null;
+  trend: number;
 }
 
 /**
@@ -300,7 +297,6 @@ export default function HistogramImpl({
             isAnimationActive={false}
             legendType="none"
             tooltipType="none"
-            connectNulls={false}
           />
           <Line
             type="monotone"
@@ -311,7 +307,6 @@ export default function HistogramImpl({
             strokeWidth={3}
             dot={false}
             isAnimationActive={false}
-            connectNulls={false}
           />
           {/*
            * Layer 4: D10/D50/D90 vertical marker.
@@ -389,35 +384,14 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     ranges.push(Math.round(lo));
   }
 
-  // Percentage (KDE 와 비교용 + tooltip 표시용).
+  // Percentage = trend = line 값 (bar 와 1:1 동기화).
+  // 이전 KDE smoothing 은 phantom value 문제 발생 → 폐기. 직접 percentage 사용.
   const percentages = counts.map((c) => (c / total) * 100);
-
-  // **KDE (Kernel Density Estimation) — log-space Gaussian**:
-  // bandwidth = log10 공간 0.08 (20% 범위 cover, 산업 도구 default 와 유사).
-  // KDE 결과는 percentage scale (우측 Y축).
-  // **0-count bin 은 null** 로 두어 Recharts 가 line 을 break (phantom line 제거).
-  const bandwidth = 0.08;
-  const logDiameters = diameters.map((d) => Math.log10(d));
-  const trend: Array<number | null> = [];
-  for (let i = 0; i < bins; i++) {
-    if (counts[i] === 0) {
-      trend.push(null);
-      continue;
-    }
-    const logCenter = logMin + (i + 0.5) * logBinWidth;
-    let density = 0;
-    for (const lv of logDiameters) {
-      const z = (logCenter - lv) / bandwidth;
-      density += Math.exp(-0.5 * z * z);
-    }
-    density /= total * bandwidth * Math.sqrt(2 * Math.PI);
-    trend.push(density * logBinWidth * 100);
-  }
 
   return counts.map((cnt, i) => ({
     range: ranges[i],
     count: cnt, // raw count (bar 좌측 Y축)
     percentage: percentages[i], // % (tooltip)
-    trend: trend[i], // KDE % or null (line 우측 Y축, 0-count 는 break)
+    trend: percentages[i], // line 우측 Y축 — bar 와 1:1 매칭
   }));
 }
