@@ -22,11 +22,15 @@ interface HistogramImplProps {
 interface HistogramBin {
   /** Bin 의 왼쪽 가장자리 (X축 위치, μm) */
   range: number;
-  /** 이 bin 에 속한 입자 수 (Bar dataKey) */
+  /**
+   * 이 bin 에 속한 입자 비율 (%) — count / total × 100. Bar dataKey.
+   * 단위 % 라 절대 입자 수와 무관하게 분포 모양 비교 가능 (산업 표준 표시).
+   */
   count: number;
   /**
-   * 이동 평균 (좌우 ±2 window, total 5점) — 추세선 dataKey.
-   * Bar 와 분리된 시리즈로 분포의 "전반적인 추세" 시각화 (bin 노이즈 smooth).
+   * KDE (Kernel Density Estimation) 추세 — log-space Gaussian kernel 기반
+   * 매끈한 분포 곡선. Line dataKey. 이전 moving average 대비 zero-count
+   * gap 자연스럽게 보간 (kernel 이 인근 데이터로 채움) → bimodal 모양 가시화.
    */
   trend: number;
 }
@@ -203,10 +207,10 @@ export default function HistogramImpl({
             }}
             formatter={(value, name) => {
               const numValue = typeof value === "number" ? value : Number(value);
-              // "trend" = 이웃 bin 이동평균 (5% window) — bin 자체와 분리.
+              // count = bin 의 percentage of total. trend = KDE smooth curve.
               if (name === "trend")
-                return [`${numValue.toFixed(1)}개`, "주변 평균"];
-              return [`${numValue}개`, "이 구간 입자"];
+                return [`${numValue.toFixed(1)}%`, "분포 (KDE)"];
+              return [`${numValue.toFixed(1)}%`, "이 구간 비율"];
             }}
             labelFormatter={(label) => `${label}μm 부터`}
           />
@@ -320,10 +324,7 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
   if (diameters.length === 0) return [];
   const sorted = [...diameters].sort((a, b) => a - b);
   const total = sorted.length;
-  // **D5-D95 범위 binning** (2026-05-02): 이전 min~P95 → P5~P95 으로 변경.
-  // 양쪽 outlier 5% 제외 시 bins 가 dense 영역만 cover → empty bin gap 감소.
-  // 사용자 보고: log-normal 분포에서 sparse outlier 영역의 빈 bin 이 시각화
-  // 왜곡. 이제 outlier 들은 leftmost / rightmost grey "outlier" bar 로 통합 표시.
+  // P5~P95 범위 binning. 양쪽 outlier 5% 제외 → dense 영역만 cover.
   const p5Index = Math.floor(total * 0.05);
   const p95Index = Math.floor(total * 0.95);
   const lowerBound = sorted[Math.min(p5Index, total - 1)];
@@ -334,7 +335,7 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
   const logBinWidth = (logMax - logMin) / bins;
 
   if (logBinWidth <= 0) {
-    return [{ range: Math.round(min), count: total, trend: total }];
+    return [{ range: Math.round(lowerBound), count: 100, trend: 100 }];
   }
 
   const counts: number[] = [];
@@ -350,29 +351,36 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     ranges.push(Math.round(lo));
   }
 
-  // Moving average — bin 수의 ~10% 양쪽 (25 bin → ±2~3, 40 bin → ±4).
-  // bin 수 늘려도 trend 선이 너무 거칠어지지 않도록 비례 적용.
-  // 최소 2, 최대 5 (단봉 평탄화는 너무 큰 window, 거침은 너무 작은 window).
-  const halfWindow = Math.max(2, Math.min(5, Math.round(counts.length * 0.1)));
-  // **Statistical noise 임계** (2026-05-02): bin 수 대비 <5% 면 noise 로 간주.
-  // 빈 bin (0) + 매우 낮은 count (1-2개) 까지 trend 평균에서 제외.
-  // 사용자 보고: "여전히 0인 영역 포함" → count=0 만 skip 으론 부족, 통계적으로
-  // 무의미한 low-count bin 도 dip 유발. log-normal 분포의 매끄러운 descending
-  // 패턴 보장.
-  const maxCount = Math.max(...counts);
-  const noiseThreshold = Math.max(1, Math.floor(maxCount * 0.05));
-  const trend = counts.map((_, i) => {
-    const start = Math.max(0, i - halfWindow);
-    const end = Math.min(counts.length, i + halfWindow + 1);
-    const slice = counts.slice(start, end);
-    const meaningful = slice.filter((c) => c >= noiseThreshold);
-    if (meaningful.length === 0) return 0;
-    return meaningful.reduce((a, b) => a + b, 0) / meaningful.length;
-  });
+  // **% 단위 변환**: count → percentage of total (0~100 스케일).
+  // 산업 표준 (laser diffraction 기반 grinder 분석 도구) 와 동일 단위.
+  // 절대 입자 수와 무관하게 분포 모양 비교 가능.
+  const percentages = counts.map((c) => (c / total) * 100);
 
-  return counts.map((count, i) => ({
+  // **KDE (Kernel Density Estimation) — log-space Gaussian**:
+  // 이전 moving average 는 zero-count gap 처리 어려움. KDE 는 모든 bin 을
+  // 인접 입자들의 가중치로 계산해 자연스럽게 smooth + gap 보간.
+  // bandwidth = log10 공간 0.08 (20% 범위 cover, 산업 도구 default 와 유사).
+  const bandwidth = 0.08;
+  const logDiameters = diameters.map((d) => Math.log10(d));
+  // 각 bin 중심 (log space) 에서 KDE 값 계산.
+  const trend: number[] = [];
+  for (let i = 0; i < bins; i++) {
+    const logCenter = logMin + (i + 0.5) * logBinWidth;
+    let density = 0;
+    for (const lv of logDiameters) {
+      const z = (logCenter - lv) / bandwidth;
+      density += Math.exp(-0.5 * z * z);
+    }
+    // Normalize: 모든 bin 에서 KDE 합이 percentage 분포와 같은 스케일이 되도록.
+    // peak 가 percentage peak 와 비슷한 높이 → 두 series 시각 비교 가능.
+    density /= total * bandwidth * Math.sqrt(2 * Math.PI);
+    // log-bin 폭으로 곱해 percentage 스케일 매칭 (Δlog × density × 100).
+    trend.push(density * logBinWidth * 100);
+  }
+
+  return percentages.map((pct, i) => ({
     range: ranges[i],
-    count,
+    count: pct,
     trend: trend[i],
   }));
 }
