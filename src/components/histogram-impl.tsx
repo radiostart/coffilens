@@ -2,6 +2,7 @@ import {
   Bar,
   Cell,
   ComposedChart,
+  Legend,
   Line,
   ReferenceArea,
   ReferenceLine,
@@ -23,14 +24,18 @@ interface HistogramBin {
   /** Bin 의 왼쪽 가장자리 (X축 위치, μm) */
   range: number;
   /**
-   * 이 bin 에 속한 입자 비율 (%) — count / total × 100. Bar dataKey.
-   * 단위 % 라 절대 입자 수와 무관하게 분포 모양 비교 가능 (산업 표준 표시).
+   * 이 bin 에 속한 raw 입자 개수. Bar dataKey, 좌측 Y축 (count).
+   * 사용자 mental model: "이 구간에 N개 입자".
    */
   count: number;
   /**
-   * KDE (Kernel Density Estimation) 추세 — log-space Gaussian kernel 기반
-   * 매끈한 분포 곡선. Line dataKey. 이전 moving average 대비 zero-count
-   * gap 자연스럽게 보간 (kernel 이 인근 데이터로 채움) → bimodal 모양 가시화.
+   * 이 bin 의 percentage of total — count / total × 100. tooltip 표시용.
+   */
+  percentage: number;
+  /**
+   * KDE (Kernel Density Estimation) 추세 — log-space Gaussian kernel.
+   * Line dataKey, 우측 Y축 (% scale).
+   * 분포 모양 (fines → peak → descending) 자연스럽게 가시화.
    */
   trend: number;
 }
@@ -179,7 +184,7 @@ export default function HistogramImpl({
            *   left   16 — X축 첫 marker 라벨 좌측 잘림 방지
            *   bottom 60 — ▼ + 한국어 + μm 3줄 라벨 영역
            */
-          margin={{ top: 8, right: 16, left: 16, bottom: 60 }}
+          margin={{ top: 32, right: 16, left: 16, bottom: 60 }}
           /*
            * Bar gap 조정 — barCategoryGap 을 늘려 개별 bar 간격 넓힘 (개별성 강조).
            * 기본값(10%) → 14%. log scale 에서도 자동 적용.
@@ -198,19 +203,40 @@ export default function HistogramImpl({
             tick={false}
             axisLine={{ stroke: "var(--color-border)" }}
           />
-          <YAxis hide />
+          {/*
+           * Dual Y-axis (2026-05-03 디자인 결정):
+           * - 좌측 (count): Bar 입자 개수, raw count
+           * - 우측 (percent): Line KDE 분포도 %
+           * 둘 다 hide — 시각 noise 줄이고 tooltip + legend 로 정보 제공.
+           * 사용자 요구 "입자 갯수 + 분포 %" 동시 가시화.
+           */}
+          <YAxis yAxisId="count" orientation="left" hide />
+          <YAxis yAxisId="percent" orientation="right" hide />
+          <Legend
+            verticalAlign="top"
+            align="right"
+            iconSize={10}
+            wrapperStyle={{ paddingBottom: 4, fontSize: 12 }}
+          />
           <Tooltip
             contentStyle={{
               borderRadius: 8,
               border: "1px solid var(--color-border)",
               fontSize: 12,
             }}
-            formatter={(value, name) => {
+            formatter={(value, name, item) => {
               const numValue = typeof value === "number" ? value : Number(value);
-              // count = bin 의 percentage of total. trend = KDE smooth curve.
-              if (name === "trend")
-                return [`${numValue.toFixed(1)}%`, "분포 (KDE)"];
-              return [`${numValue.toFixed(1)}%`, "이 구간 비율"];
+              if (name === "분포도 (%)") {
+                return [`${numValue.toFixed(1)}%`, name];
+              }
+              if (name === "입자 개수") {
+                // Bar — raw count 값. tooltip 에 percentage 도 함께 표시.
+                const pct = (item?.payload as { percentage?: number })
+                  ?.percentage;
+                const pctStr = typeof pct === "number" ? ` (${pct.toFixed(1)}%)` : "";
+                return [`${Math.round(numValue)}개${pctStr}`, name];
+              }
+              return [`${numValue}`, name];
             }}
             labelFormatter={(label) => `${label}μm 부터`}
           />
@@ -221,6 +247,7 @@ export default function HistogramImpl({
            */}
           {d10 !== undefined && d90 !== undefined && (
             <ReferenceArea
+              yAxisId="count"
               x1={Math.round(d10)}
               x2={Math.round(d90)}
               fill={BAND_COLOR}
@@ -229,12 +256,13 @@ export default function HistogramImpl({
             />
           )}
           {/*
-           * Layer 2: Bar — D10~D90 영역은 강한 색, outlier 영역은 옅게.
-           * Cell 별 conditional fill 로 같은 dataKey 안에서 색 분기.
-           * radius 4 → 6 (더 부드러운 인상).
+           * Layer 2: Bar (좌측 Y축 = 입자 개수). D10~D90 영역은 강한 색, outlier 영역은 옅게.
            */}
           <Bar
             dataKey="count"
+            name="입자 개수"
+            yAxisId="count"
+            fill={PRIMARY_STRONG}
             radius={[6, 6, 0, 0]}
             isAnimationActive={false}
           >
@@ -253,14 +281,12 @@ export default function HistogramImpl({
             })}
           </Bar>
           {/*
-           * Layer 3: Trend line — 흰 outline (5px) + 녹색 stroke (3px) 합성.
-           * 두 Line 컴포넌트로 outline + foreground 효과. Bar 위에 그려져 어떤
-           * fill (강한 갈색 / 옅은 갈색 / band 녹색) 위에서도 명확히 보임.
-           * dot=false 로 깔끔, monotone 보간으로 부드러운 곡선.
+           * Layer 3: Trend line (우측 Y축 = 분포도 %). 흰 outline + 녹색 stroke.
            */}
           <Line
             type="monotone"
             dataKey="trend"
+            yAxisId="percent"
             stroke="#FFFFFF"
             strokeWidth={5}
             dot={false}
@@ -271,6 +297,8 @@ export default function HistogramImpl({
           <Line
             type="monotone"
             dataKey="trend"
+            name="분포도 (%)"
+            yAxisId="percent"
             stroke={TREND_COLOR}
             strokeWidth={3}
             dot={false}
@@ -286,6 +314,7 @@ export default function HistogramImpl({
             return (
               <ReferenceLine
                 key={m.title}
+                yAxisId="count"
                 x={Math.round(m.x)}
                 stroke={isStrong ? MARKER_STRONG : MARKER_COLOR}
                 strokeWidth={isStrong ? 2 : 1.5}
@@ -351,18 +380,14 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     ranges.push(Math.round(lo));
   }
 
-  // **% 단위 변환**: count → percentage of total (0~100 스케일).
-  // 산업 표준 (laser diffraction 기반 grinder 분석 도구) 와 동일 단위.
-  // 절대 입자 수와 무관하게 분포 모양 비교 가능.
+  // Percentage (KDE 와 비교용 + tooltip 표시용).
   const percentages = counts.map((c) => (c / total) * 100);
 
   // **KDE (Kernel Density Estimation) — log-space Gaussian**:
-  // 이전 moving average 는 zero-count gap 처리 어려움. KDE 는 모든 bin 을
-  // 인접 입자들의 가중치로 계산해 자연스럽게 smooth + gap 보간.
   // bandwidth = log10 공간 0.08 (20% 범위 cover, 산업 도구 default 와 유사).
+  // KDE 결과는 percentage scale (우측 Y축).
   const bandwidth = 0.08;
   const logDiameters = diameters.map((d) => Math.log10(d));
-  // 각 bin 중심 (log space) 에서 KDE 값 계산.
   const trend: number[] = [];
   for (let i = 0; i < bins; i++) {
     const logCenter = logMin + (i + 0.5) * logBinWidth;
@@ -371,16 +396,14 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
       const z = (logCenter - lv) / bandwidth;
       density += Math.exp(-0.5 * z * z);
     }
-    // Normalize: 모든 bin 에서 KDE 합이 percentage 분포와 같은 스케일이 되도록.
-    // peak 가 percentage peak 와 비슷한 높이 → 두 series 시각 비교 가능.
     density /= total * bandwidth * Math.sqrt(2 * Math.PI);
-    // log-bin 폭으로 곱해 percentage 스케일 매칭 (Δlog × density × 100).
     trend.push(density * logBinWidth * 100);
   }
 
-  return percentages.map((pct, i) => ({
+  return counts.map((cnt, i) => ({
     range: ranges[i],
-    count: pct,
-    trend: trend[i],
+    count: cnt, // raw count (bar 좌측 Y축)
+    percentage: percentages[i], // % (tooltip)
+    trend: trend[i], // KDE % (line 우측 Y축)
   }));
 }
