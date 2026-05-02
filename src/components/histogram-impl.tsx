@@ -203,9 +203,11 @@ export default function HistogramImpl({
             }}
             formatter={(value, name) => {
               const numValue = typeof value === "number" ? value : Number(value);
+              // "trend" = ±2 이웃 구간 이동평균 — bin 자체 값과 분리. label
+              // 명확화 (사용자: "0개인데 왜 추세 67?" 헷갈림 방지).
               if (name === "trend")
-                return [`${numValue.toFixed(1)}개`, "추세 (이동평균)"];
-              return [`${numValue}개`, "입자 수"];
+                return [`${numValue.toFixed(1)}개`, "주변 평균 (±2 구간)"];
+              return [`${numValue}개`, "이 구간 입자"];
             }}
             labelFormatter={(label) => `${label}μm 부터`}
           />
