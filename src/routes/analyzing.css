@@ -39,21 +39,28 @@
 /*
  * Indeterminate progress (coin detection 등 progress 산출 불가 단계).
  * 좌→우 슬라이딩 애니메이션 — 실제 진행률 모르므로 "작업 중" 만 표현.
- * width 30% 의 bar 가 -30% → 130% 위치로 무한 반복.
+ *
+ * **중요**: transform: translateX 사용 (compositor thread).
+ * margin-left 등 layout 트리거 속성은 HoughCircles WASM 호출 동안 main
+ * thread 가 블록되면 애니메이션도 멈춤 → 로딩바 안 보임. transform 은
+ * GPU compositor 에서 처리되어 main thread 블록 무관하게 동작.
  */
 .analyzing-progress-bar-indeterminate {
   width: 30%;
-  animation: analyzing-progress-slide 1200ms var(--ease-inout) infinite;
   /* width transition 비활성화 (정해진 width 유지) */
   transition: none;
+  /* translateX(-100%) 시작 → bar 가 트랙의 왼쪽 밖. 333% 끝 (= 100/30 * 100%)
+     → 트랙의 오른쪽 밖. 한 사이클 = -100% ~ 333% 슬라이드. */
+  animation: analyzing-progress-slide 1200ms var(--ease-inout) infinite;
+  will-change: transform;
 }
 
 @keyframes analyzing-progress-slide {
   0% {
-    margin-left: -30%;
+    transform: translateX(-100%);
   }
   100% {
-    margin-left: 100%;
+    transform: translateX(333%);
   }
 }
 
