@@ -353,7 +353,13 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     const start = Math.max(0, i - halfWindow);
     const end = Math.min(counts.length, i + halfWindow + 1);
     const slice = counts.slice(start, end);
-    return slice.reduce((a, b) => a + b, 0) / slice.length;
+    // **Zero-count bin 제외** (2026-05-02 사용자 보고): 빈 bin (0개) 까지
+    // 평균에 포함하면 trend 선이 0 으로 끌어내려져 진짜 분포 모양 왜곡.
+    // 데이터 있는 bin 만 평균 — log-normal 분포 (fines 많음 → 중앙 → 큰쪽 적음)
+    // 의 자연스러운 descending 패턴 가시화.
+    const nonZero = slice.filter((c) => c > 0);
+    if (nonZero.length === 0) return 0;
+    return nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
   });
 
   return counts.map((count, i) => ({
