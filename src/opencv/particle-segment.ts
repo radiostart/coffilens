@@ -29,6 +29,13 @@ import type { AnalysisError } from "./errors";
 declare const cv: {
   imread: (canvas: HTMLCanvasElement | OffscreenCanvas) => CvMat;
   cvtColor: (src: CvMat, dst: CvMat, code: number) => void;
+  bilateralFilter: (
+    src: CvMat,
+    dst: CvMat,
+    d: number,
+    sigmaColor: number,
+    sigmaSpace: number,
+  ) => void;
   adaptiveThreshold: (
     src: CvMat,
     dst: CvMat,
@@ -195,12 +202,22 @@ export async function segmentParticles(
         -1,
       );
 
-      // **CLAHE 시도 (2026-05-02) → 보류**: clipLimit 1~2 모두 V60 fixture
-      // 에서 clump area 0% → 42-47% 로 false alarm. tile texture amplify 가
-      // adaptive threshold 와 결합해 phantom 입자 폭증.
-      // espresso fine grind 에는 효과 (D50 532→280 sieve, 카테고리 정정)
-      // 있지만 V60 종합 정확도 저하 → 보류. Phase 2 (bilateral 먼저로 noise
-      // 억제 후 CLAHE) 로 시도하거나, fine 전용 분기 검토 필요.
+      // **측정 품질 향상 시도 결과 (2026-05-02) — 모두 보류**:
+      //
+      // Phase 1 (CLAHE 단독): clipLimit 1~2 모두 V60 에서 clump area
+      // 0%→42-47% false alarm. 종이 텍스처 amplify 가 phantom 유발.
+      //
+      // Phase 2 (bilateral + CLAHE): bilateral d=9 sigmaColor=50 으로
+      // paper noise 제거 시도했으나, V60 입자 자체가 1-3px 크기라 bilateral
+      // 이 입자 boundary 도 smooth → 입자 merge → D50 image 198 → 814
+      // (sieve 337 → 1384) 폭증. 더 작은 d/sigma 도 효과 미미.
+      //
+      // 분석: 종이 텍스처 noise 와 V60 미세 입자가 비슷한 크기 (1-3px) 라
+      // 서로 분리 불가. denoise 가 noise 와 입자 둘 다 제거.
+      // 사용자 실제 분쇄가 fine (~300μm sieve = 180μm image) 영역인 것이
+      // 확인됨 (원본 측정값과 일치). 향후 sieve 분급 fixture 로 ground truth
+      // 검증 후 다른 접근 (e.g., multi-scale segmentation, sub-pixel 추정)
+      // 검토 가능.
 
       // 2. Adaptive threshold
       const binary = scope.track(new cv.Mat());
