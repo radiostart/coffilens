@@ -99,6 +99,15 @@ function setupCvMock(opts: CvMockOpts = {}) {
     Scalar: vi.fn(function MockScalar(...vals: number[]) {
       return vals;
     }),
+    Size: vi.fn(function MockSize(w: number, h: number) {
+      return { width: w, height: h };
+    }),
+    CLAHE: vi.fn(function MockCLAHE() {
+      return {
+        apply: vi.fn(),
+        delete: vi.fn(),
+      };
+    }),
     COLOR_RGBA2GRAY: 0,
     COLOR_RGBA2RGB: 0,
     CV_8U: 0,

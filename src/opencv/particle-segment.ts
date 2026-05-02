@@ -82,6 +82,11 @@ declare const cv: {
   MatVector: new (...args: unknown[]) => CvMatVector;
   Point: new (x: number, y: number) => CvPoint;
   Scalar: new (...values: number[]) => CvScalar;
+  Size: new (width: number, height: number) => { width: number; height: number };
+  CLAHE: new (
+    clipLimit?: number,
+    tileGridSize?: { width: number; height: number },
+  ) => CvCLAHE;
   COLOR_RGBA2GRAY: number;
   COLOR_RGBA2RGB: number;
   CV_8U: number;
@@ -112,6 +117,10 @@ interface CvMat extends Disposable {
 interface CvMatVector extends Disposable {
   size: () => number;
   get: (index: number) => CvMat;
+}
+
+interface CvCLAHE extends Disposable {
+  apply: (src: CvMat, dst: CvMat) => void;
 }
 
 interface CvPoint {
@@ -185,6 +194,13 @@ export async function segmentParticles(
         new cv.Scalar(0),
         -1,
       );
+
+      // **CLAHE 시도 (2026-05-02) → 보류**: clipLimit 1~2 모두 V60 fixture
+      // 에서 clump area 0% → 42-47% 로 false alarm. tile texture amplify 가
+      // adaptive threshold 와 결합해 phantom 입자 폭증.
+      // espresso fine grind 에는 효과 (D50 532→280 sieve, 카테고리 정정)
+      // 있지만 V60 종합 정확도 저하 → 보류. Phase 2 (bilateral 먼저로 noise
+      // 억제 후 CLAHE) 로 시도하거나, fine 전용 분기 검토 필요.
 
       // 2. Adaptive threshold
       const binary = scope.track(new cv.Mat());
