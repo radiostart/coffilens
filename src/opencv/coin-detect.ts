@@ -307,22 +307,55 @@ export async function detectCoin(
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     cv.medianBlur(gray, gray, 7);
 
-    // **2026-05-02 ROI 최적화 시도 → 되돌림**: hint 주변 ROI 만 HoughCircles
-    // 처리하면 espresso 사진 30s → 3s 로 빨라지지만, ROI 내 minDist/minRadius
-    // 가 작아져 작은 phantom circle 이 real coin 보다 우선 검출되는 회귀 발생
-    // (사용자 보고: D50 309 → 709). 정확도 우선 정책으로 전체 이미지 탐색
-    // 유지. coin 검출 느림 UX 는 indeterminate progress bar 로 대응.
+    // **ROI 최적화 v2 (2026-05-02 재시도)**: hint 있을 때만 hint 주변 search.
+    //
+    // 이전 v1 실패 원인: HoughCircles 파라미터 (minDist/minR/maxR) 를 ROI 차원
+    // 비례로 계산해 ROI 작아질수록 작은 phantom circle 도 valid 후보가 됨 →
+    // 잘못된 coin 검출. (사용자 보고: D50 309 → 709 회귀)
+    //
+    // v2 수정: ROI 는 search 범위만 줄이고, 파라미터는 **전체 이미지 차원
+    // 기준 절대값 유지** → "유효 동전" 정의 변경 X. 정확도 보존하며 속도 ↑.
+    //
+    // 추가 단순화: hint 있으면 사용자가 동전 위치 명시했으므로 intensity/exterior/
+    // gradient 필터 skip (사용자 권위 우선). 합리적 크기 (r 50~maxR) 만 검사.
+    //
+    // 반환된 원의 좌표는 ROI offset 더해 원본 이미지 좌표로 변환.
     const circles = scope.track(new cv.Mat());
+    let roiOffsetX = 0;
+    let roiOffsetY = 0;
+    let houghInput = gray;
+    if (coinHint) {
+      const hintX = Math.round(coinHint.x * gray.cols);
+      const hintY = Math.round(coinHint.y * gray.rows);
+      // ROI 반쪽 size = rows × 35% = ~448px (1280 기준). 일반적 동전 직경
+      // (~150px) 의 6배 buffer → 사용자 탭이 동전 가운데서 벗어나도 안전.
+      const halfSize = Math.round(gray.rows * 0.35);
+      const x0 = Math.max(0, hintX - halfSize);
+      const y0 = Math.max(0, hintY - halfSize);
+      const x1 = Math.min(gray.cols, hintX + halfSize);
+      const y1 = Math.min(gray.rows, hintY + halfSize);
+      const rect = new cv.Rect(x0, y0, x1 - x0, y1 - y0);
+      const cropped = scope.track(gray.roi(rect));
+      houghInput = cropped;
+      roiOffsetX = x0;
+      roiOffsetY = y0;
+      console.log(
+        `[coin-detect] hint ROI: (${x0},${y0}) ${x1 - x0}×${y1 - y0} (full ${gray.cols}×${gray.rows})`,
+      );
+    }
+
+    // 파라미터는 ROI 와 무관하게 **전체 이미지 (gray) 차원 기준 절대값**.
+    // ROI 가 작아도 동일한 minDist/minR/maxR 적용 → 정확도 보존.
     cv.HoughCircles(
-      gray,
+      houghInput,
       circles,
       cv.HOUGH_GRADIENT,
       1, // dp
-      gray.rows / 3, // minDist — 이전 rows/4 보다 보수적 (서로 더 멀리 있어야 함)
+      gray.rows / 3, // minDist (전체 차원 기준 절대값)
       100, // param1 (Canny 상위 임계)
-      50, // param2 (검출 임계, false positive 는 intensity/stddev 필터로 차단)
-      Math.round(gray.rows * 0.05), // minRadius (이미지 5%)
-      Math.round(gray.rows * 0.4), // maxRadius (이미지 40%)
+      50, // param2 (검출 임계)
+      Math.round(gray.rows * 0.05), // minRadius (전체 차원 5%)
+      Math.round(gray.rows * 0.4), // maxRadius (전체 차원 40%)
     );
 
     const numCircles = circles.cols;
@@ -332,114 +365,135 @@ export async function detectCoin(
     }
 
     // 검출된 원들을 radius 내림차순 정렬 (data32F: [cx0, cy0, r0, cx1, cy1, r1, ...])
+    // ROI 사용 시 좌표를 원본 이미지 좌표계로 변환 (offset 더함).
     const sortedCircles: Array<{ cx: number; cy: number; r: number }> = [];
     for (let i = 0; i < numCircles; i++) {
       sortedCircles.push({
-        cx: circles.data32F[i * 3],
-        cy: circles.data32F[i * 3 + 1],
+        cx: circles.data32F[i * 3] + roiOffsetX,
+        cy: circles.data32F[i * 3 + 1] + roiOffsetY,
         r: circles.data32F[i * 3 + 2],
       });
     }
     sortedCircles.sort((a, b) => b.r - a.r);
 
-    // 후보 동전 필터 — interior 통계 + exterior ring 비교.
-    //   interior mean/stddev: 동전 metal 균일성 검증 (mean 110-225, stddev ≤42)
-    //   exterior mean: napkin 위 동전 vs 커피 둘러싸인 napkin 구멍 구분
-    //     |interior - exterior| > 70 → napkin 구멍 (false positive) reject
-    const annotated = sortedCircles.map((c) => {
-      const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
-      const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
-      // rim gradient 는 unblurred gray 사용 — sharp edge 보존
-      const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
-      return { ...c, ...interior, exterior, rimGradient };
-    });
-    console.log(
-      "[coin-detect] all circles:",
-      annotated
-        .map(
-          (c) =>
-            `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) i=${c.mean.toFixed(0)}±${c.stddev.toFixed(0)} ext=${c.exterior.toFixed(0)} grad=${c.rimGradient.toFixed(0)}`,
-        )
-        .join(" | "),
-    );
+    type CoinCandidate = {
+      cx: number;
+      cy: number;
+      r: number;
+      mean: number;
+      stddev: number;
+      exterior: number;
+      rimGradient: number;
+    };
+    let selectedCandidate: CoinCandidate;
 
-    const coinCandidates = annotated.filter((c) => {
-      // interior 통계 필터
-      if (c.mean < COIN_MIN_MEAN_INTENSITY) return false;
-      if (c.mean > COIN_MAX_MEAN_INTENSITY) return false;
-      if (c.stddev > COIN_MAX_STDDEV) return false;
-      // exterior ring 필터: 동전이면 외부도 napkin (밝음). interior - exterior 작음.
-      // c.exterior === 999 (이미지 경계 벗어남) 이면 검증 skip — 통과시킴.
-      // STRONG GRADIENT BYPASS: rim gradient ≥ 50 이면 sharp metal edge 확정 →
-      // |int-ext| 임계 우회 (진짜 동전 false reject 방지).
-      if (
-        c.exterior !== 999 &&
-        c.rimGradient < COIN_GRADIENT_STRONG_BYPASS
-      ) {
-        const diff = Math.abs(c.mean - c.exterior);
-        if (diff > COIN_MAX_INTERIOR_EXTERIOR_DIFF) return false;
-      }
-      // rim gradient 필터: 진짜 coin rim 은 sharp transition. napkin 구멍 / 약한 edge reject.
-      if (c.rimGradient < COIN_MIN_RIM_GRADIENT) return false;
-      return true;
-    });
-    console.log(
-      `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}], stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
-    );
-
-    if (coinCandidates.length === 0) {
-      throw { kind: "no_coin" } satisfies AnalysisError;
-    }
-
-    // Hint 처리 — 사용자가 동전 위치 탭한 경우. hint 에 가장 가까운 candidate 채택.
-    // multi_coin 검사 우회 (사용자가 명시적으로 "이 동전" 지정).
-    let selectedCandidate: (typeof coinCandidates)[number];
     if (coinHint) {
+      // **Simplified hint path (2026-05-02)**: 사용자가 동전 위치 명시했으므로
+      // intensity/exterior/gradient 필터 skip. HoughCircles 가 검출한 원 중
+      // hint 와 가장 가까운 것 선택 (사용자 권위 우선).
+      //
+      // 후보 logging 위해 stats 계산하지만 필터링엔 사용 X (디버그용).
       const hintX = coinHint.x * gray.cols;
       const hintY = coinHint.y * gray.rows;
-      const sortedByDist = [...coinCandidates].sort((a, b) => {
+      const sortedByDist = [...sortedCircles].sort((a, b) => {
         const da = Math.hypot(a.cx - hintX, a.cy - hintY);
         const db = Math.hypot(b.cx - hintX, b.cy - hintY);
         return da - db;
       });
-      selectedCandidate = sortedByDist[0];
+      console.log(
+        `[coin-detect] hint candidates (sorted by dist):`,
+        sortedByDist
+          .map((c) => {
+            const dist = Math.hypot(c.cx - hintX, c.cy - hintY);
+            return `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) dist=${dist.toFixed(0)}`;
+          })
+          .join(" | "),
+      );
+      const picked = sortedByDist[0];
+      // 디버그용 intensity stats — 필터 skip 이므로 결과에만 기록.
+      const interior = intensityStatsInCircle(gray, picked.cx, picked.cy, picked.r);
+      const exterior = meanIntensityRingOutside(gray, picked.cx, picked.cy, picked.r);
+      const rimGradient = meanRimGradient(grayOriginal, picked.cx, picked.cy, picked.r);
+      selectedCandidate = { ...picked, ...interior, exterior, rimGradient };
       const dist = Math.hypot(
         selectedCandidate.cx - hintX,
         selectedCandidate.cy - hintY,
       );
       console.log(
         `[coin-detect] hint at (${hintX.toFixed(0)},${hintY.toFixed(0)}). ` +
-          `nearest candidate: r=${selectedCandidate.r.toFixed(1)} @(${selectedCandidate.cx.toFixed(0)},${selectedCandidate.cy.toFixed(0)}) dist=${dist.toFixed(0)}px. ` +
-          `multi_coin 검사 우회.`,
+          `nearest candidate: r=${selectedCandidate.r.toFixed(1)} @(${selectedCandidate.cx.toFixed(0)},${selectedCandidate.cy.toFixed(0)}) dist=${dist.toFixed(0)}px ` +
+          `i=${selectedCandidate.mean.toFixed(0)}±${selectedCandidate.stddev.toFixed(0)} ext=${selectedCandidate.exterior.toFixed(0)} grad=${selectedCandidate.rimGradient.toFixed(0)}. ` +
+          `intensity 필터 skip (사용자 hint).`,
       );
-    } else if (coinCandidates.length > 1) {
-      // hint 없음 — 자동 검출 분기 (가장 큰 것 + concentric/separated 검사)
-      const biggest = coinCandidates[0];
-      const filtered = coinCandidates.filter(
-        (c) => c.r >= biggest.r * NOISE_RADIUS_RATIO,
-      );
-
-      const separatedCircles = filtered.slice(1).filter((c) => {
-        const dx = c.cx - biggest.cx;
-        const dy = c.cy - biggest.cy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        return dist > biggest.r * CONCENTRIC_DISTANCE_FACTOR;
-      });
-
-      console.log(
-        `[coin-detect] ${coinCandidates.length} coin candidates. biggest r=${biggest.r.toFixed(1)} center=(${biggest.cx.toFixed(0)},${biggest.cy.toFixed(0)}) i=${biggest.mean.toFixed(0)}±${biggest.stddev.toFixed(0)}. ` +
-          `${filtered.length - 1} non-noise, ${separatedCircles.length} separated.`,
-      );
-
-      if (separatedCircles.length > 0) {
-        throw {
-          kind: "multi_coin",
-          count: filtered.length,
-        } satisfies AnalysisError;
-      }
-      selectedCandidate = biggest;
     } else {
-      selectedCandidate = coinCandidates[0];
+      // 자동 검출 분기 — hint 없을 때만 intensity/exterior/gradient 필터 적용.
+      const annotated = sortedCircles.map((c) => {
+        const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
+        const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
+        const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
+        return { ...c, ...interior, exterior, rimGradient };
+      });
+      console.log(
+        "[coin-detect] all circles:",
+        annotated
+          .map(
+            (c) =>
+              `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) i=${c.mean.toFixed(0)}±${c.stddev.toFixed(0)} ext=${c.exterior.toFixed(0)} grad=${c.rimGradient.toFixed(0)}`,
+          )
+          .join(" | "),
+      );
+
+      const coinCandidates = annotated.filter((c) => {
+        if (c.mean < COIN_MIN_MEAN_INTENSITY) return false;
+        if (c.mean > COIN_MAX_MEAN_INTENSITY) return false;
+        if (c.stddev > COIN_MAX_STDDEV) return false;
+        if (
+          c.exterior !== 999 &&
+          c.rimGradient < COIN_GRADIENT_STRONG_BYPASS
+        ) {
+          const diff = Math.abs(c.mean - c.exterior);
+          if (diff > COIN_MAX_INTERIOR_EXTERIOR_DIFF) return false;
+        }
+        if (c.rimGradient < COIN_MIN_RIM_GRADIENT) return false;
+        return true;
+      });
+      console.log(
+        `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}], stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
+      );
+
+      if (coinCandidates.length === 0) {
+        throw { kind: "no_coin" } satisfies AnalysisError;
+      }
+
+      if (coinCandidates.length > 1) {
+        // hint 없음 — 자동 검출 분기 (가장 큰 것 + concentric/separated 검사)
+        const biggest = coinCandidates[0];
+        const filtered = coinCandidates.filter(
+          (c) => c.r >= biggest.r * NOISE_RADIUS_RATIO,
+        );
+
+        const separatedCircles = filtered.slice(1).filter((c) => {
+          const dx = c.cx - biggest.cx;
+          const dy = c.cy - biggest.cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          return dist > biggest.r * CONCENTRIC_DISTANCE_FACTOR;
+        });
+
+        console.log(
+          `[coin-detect] ${coinCandidates.length} coin candidates. biggest r=${biggest.r.toFixed(1)} center=(${biggest.cx.toFixed(0)},${biggest.cy.toFixed(0)}) i=${biggest.mean.toFixed(0)}±${biggest.stddev.toFixed(0)}. ` +
+            `${filtered.length - 1} non-noise, ${separatedCircles.length} separated.`,
+        );
+
+        if (separatedCircles.length > 0) {
+          throw {
+            kind: "multi_coin",
+            count: filtered.length,
+          } satisfies AnalysisError;
+        }
+        selectedCandidate = biggest;
+      } else {
+        selectedCandidate = coinCandidates[0];
+      }
     }
 
     const { cx, cy, r } = selectedCandidate;
