@@ -10,6 +10,12 @@
  * Worker context 지원: document 없으면 OffscreenCanvas 사용.
  */
 
+// **C2 (1920px) 시도 → 보류 (2026-05-02)**:
+// preflight blur 임계 (MIN_LAPLACIAN_VAR=100) 가 1280 기준으로 튜닝됨.
+// 1920 에서 동일 사진 laplacian variance 96.4 로 임계 미달 → false-positive
+// blur reject. 추가 임계 스케일링 필요해 회귀 위험. C1 (adaptive MIN) 만
+// 으로도 fines 회복 효과 충분하므로 1280 유지. 1920 은 향후 ground-truth
+// fixture 도착 후 재검토.
 const TARGET_LONG_EDGE = 1280;
 
 type SourceLike =

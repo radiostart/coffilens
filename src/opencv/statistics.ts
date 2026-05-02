@@ -50,7 +50,22 @@ export interface ParticleStats {
   };
 }
 
-const MIN_PARTICLE_DIAMETER_UM = 100;
+// **MIN diameter — adaptive (2026-05-02 C1 개선)**:
+// 이전 고정 100μm image-space → 픽셀 해상도에 따라 dynamic.
+// 다른 AI 비평: "100μm 이하 fines 누락" 정당. 실제로 mmPerPx 작을 때 (close-up,
+// 동전 크게 보임) 100μm 는 이미 2-3px 라 안전한 검출 가능 → 더 낮춰 fines 회복.
+// mmPerPx 클 때 (멀리 촬영, 동전 작게 보임) 는 100μm 가 1-2px 라 sub-pixel
+// 한계로 자연스럽게 fines 검출 안 됨 — MIN 그대로 100 유지.
+//
+// 즉 **MIN 은 절대 100 초과하지 않게**, 가까이 촬영시만 더 낮춤.
+// 공식: min(100, 1500 × mmPerPx), 하한 50.
+//   mmPerPx 0.030 (5.1 close-up): 1500*0.030=45 → clamp 50 (이전 100 보다 -50%)
+//   mmPerPx 0.045 (V60 close-up): 67.5 → 67μm
+//   mmPerPx 0.069 (moka): 103 → clamp 100 (이전 동일)
+//   mmPerPx 0.10+ (보통/멀리): 150+ → clamp 100 (이전 동일)
+function computeMinDiameter(mmPerPixel: number): number {
+  return Math.max(50, Math.min(100, 1500 * mmPerPixel));
+}
 // image-space 기준 — sieve 표준 fines (<300μm sieve) 와 다름. UI 에서 "미분"
 // 으로 표시되지만 의미는 "측정 직경 ≤ 300μm 작은 입자 면적 비율" 로 같은 분쇄
 // 내 상대 비교용. calibration 변환에 영향받지 않음 (statistics.ts 는 image-space).
@@ -89,6 +104,7 @@ export function computeStats(
   mmPerPixel: number,
 ): ParticleStats {
   // 1단계: 모든 contour 의 직경 + 면적 수집 (배경/노이즈 1차 필터)
+  const minDiameterUm = computeMinDiameter(mmPerPixel);
   const candidates: Array<{ diameterUm: number; areaMm2: number }> = [];
   // diagnostic: 필터별 카운트 + raw 분포 통계 (DEBUG_STATS=1 시 출력)
   let belowMinCount = 0;
@@ -111,7 +127,7 @@ export function computeStats(
 
     rawDiameters.push(diameterUm);
 
-    if (diameterUm < MIN_PARTICLE_DIAMETER_UM) {
+    if (diameterUm < minDiameterUm) {
       belowMinCount++;
       continue;
     }
@@ -183,7 +199,7 @@ export function computeStats(
       `[stats] raw contours=${numContours} ` +
         `(P5=${p(0.05)} P25=${p(0.25)} P50=${p(0.5)} ` +
         `P75=${p(0.75)} P95=${p(0.95)} P99=${p(0.99)} max=${Math.round(sortedRaw[sortedRaw.length - 1] ?? 0)}μm image-space) | ` +
-        `filtered: <${MIN_PARTICLE_DIAMETER_UM}μm noise=${belowMinCount} ` +
+        `filtered: <${Math.round(minDiameterUm)}μm noise=${belowMinCount} ` +
         `(${((belowMinCount / numContours) * 100).toFixed(1)}%), ` +
         `>${MAX_PARTICLE_DIAMETER_UM}μm bg=${aboveMaxCount} | ` +
         `candidates=${candidates.length} (tempD50=${Math.round(tempD50)}μm, ` +
@@ -226,7 +242,7 @@ export function percentile(sorted: number[], p: number): number {
 }
 
 export const _internal = {
-  MIN_PARTICLE_DIAMETER_UM,
+  computeMinDiameter,
   FINES_THRESHOLD_UM,
   MAX_PARTICLE_DIAMETER_UM,
   CLUMP_MIN_DIAMETER_UM,

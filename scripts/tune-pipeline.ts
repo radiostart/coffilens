@@ -105,8 +105,10 @@ async function main() {
     `[tune] source: ${rawMeta.width}×${rawMeta.height} → post-rotate ${postW}×${postH} (orientation=${rawMeta.orientation ?? 1})`,
   );
 
+  // production TARGET_LONG_EDGE 와 일치 (image-downsample.ts).
+  const TARGET = 1280;
   const longEdge = Math.max(postW, postH);
-  const scale = longEdge <= 1280 ? 1 : 1280 / longEdge;
+  const scale = longEdge <= TARGET ? 1 : TARGET / longEdge;
   const dstW = Math.round(postW * scale);
   const dstH = Math.round(postH * scale);
   console.log(`[tune] downsample → ${dstW}×${dstH} (scale=${scale.toFixed(3)})`);

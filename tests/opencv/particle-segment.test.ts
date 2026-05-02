@@ -61,6 +61,7 @@ function setupCvMock(opts: CvMockOpts = {}) {
       return m;
     }),
     cvtColor: vi.fn(),
+    bilateralFilter: vi.fn(),
     adaptiveThreshold: vi.fn(),
     bitwise_and: vi.fn(() => {
       // OOM 시뮬레이션 — fine grind 분기에서 morph/watershed 우회 후 호출되는 cv 중

@@ -203,10 +203,9 @@ export default function HistogramImpl({
             }}
             formatter={(value, name) => {
               const numValue = typeof value === "number" ? value : Number(value);
-              // "trend" = ±2 이웃 구간 이동평균 — bin 자체 값과 분리. label
-              // 명확화 (사용자: "0개인데 왜 추세 67?" 헷갈림 방지).
+              // "trend" = 이웃 bin 이동평균 (5% window) — bin 자체와 분리.
               if (name === "trend")
-                return [`${numValue.toFixed(1)}개`, "주변 평균 (±2 구간)"];
+                return [`${numValue.toFixed(1)}개`, "주변 평균"];
               return [`${numValue}개`, "이 구간 입자"];
             }}
             labelFormatter={(label) => `${label}μm 부터`}
@@ -346,10 +345,12 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     ranges.push(Math.round(lo));
   }
 
-  // Moving average — 좌우 ±2 (window 5).
+  // Moving average — bin 수의 ~5% 양쪽 (40 bin → ±2). bin 수 늘려도 trend
+  // 선이 너무 거칠어지지 않도록 비례 적용. 최소 1, 최대 4 (지나친 oversmooth 방지).
+  const halfWindow = Math.max(1, Math.min(4, Math.round(counts.length * 0.05)));
   const trend = counts.map((_, i) => {
-    const start = Math.max(0, i - 2);
-    const end = Math.min(counts.length, i + 3);
+    const start = Math.max(0, i - halfWindow);
+    const end = Math.min(counts.length, i + halfWindow + 1);
     const slice = counts.slice(start, end);
     return slice.reduce((a, b) => a + b, 0) / slice.length;
   });

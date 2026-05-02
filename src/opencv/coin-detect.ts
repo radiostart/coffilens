@@ -322,10 +322,18 @@ export async function detectCoin(
     // 측정용 (intensity stats / particle segment) 은 기존 gray 그대로 사용 —
     // 이 Mat 은 detection 전용. 분쇄도 측정 정확도 영향 X.
     //
-    // GaussianBlur 15x15 → coffee 입자 (1-3px) 완전 흐리게, 동전 (100-200px)
-    // 은 윤곽 보존.
+    // GaussianBlur kernel — image 해상도 비례 (1280: 15, 1920: 23).
+    // coffee 입자 (1-3px @ 1280, 1.5-4.5px @ 1920) 완전 흐리게, 동전 윤곽 보존.
+    // 2026-05-02 C2: TARGET_LONG_EDGE 1280→1920 변경에 맞춰 kernel 비례 ↑.
+    const blurKernel =
+      gray.rows >= 1600 ? 23 : 15; // 1.5x scale at higher resolution
     const coinDetectGray = scope.track(new cv.Mat());
-    cv.GaussianBlur(gray, coinDetectGray, new cv.Size(15, 15), 0);
+    cv.GaussianBlur(
+      gray,
+      coinDetectGray,
+      new cv.Size(blurKernel, blurKernel),
+      0,
+    );
 
     const circles = scope.track(new cv.Mat());
     cv.HoughCircles(

@@ -18,7 +18,10 @@ interface HistogramProps {
 
 export function Histogram({
   diameters,
-  bins = 20,
+  // bins 20 → 40 (2026-05-02 C4 개선): 분포 모양 정직 표현. 적은 bin 은
+  // bimodal (fines peak + main peak) 을 단봉으로 평탄화시킴. 다른 AI 비평
+  // "분포 너무 매끈" 대응. log binning 과 결합 시 작은 fines peak 도 가시화.
+  bins = 40,
   d10,
   d50,
   d90,

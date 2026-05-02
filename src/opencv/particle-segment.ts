@@ -142,7 +142,14 @@ const MASK_MARGIN_MM = 5;
 // 51 → 21: 작은 block 으로 미세 입자 (1~3px) 의 local contrast 픽업.
 // 51 은 medium grind (5~10px 입자) 기준 — fine grind 에서는 입자가 block 안에서
 // 노이즈로 흡수되어 false negative 발생.
-const ADAPT_BLOCK_SIZE = 21;
+//
+// **2026-05-02 C2**: TARGET_LONG_EDGE 1280→1920 (1.5x). block size 도 비례
+// 스케일 (21→31) 해야 동일 물리 범위 (~1.5mm) 를 cover. 동적으로 결정.
+function computeAdaptBlockSize(rows: number): number {
+  // 1280 → 21, 1920 → 31. 홀수 보장.
+  const base = Math.round((rows / 1280) * 21);
+  return base % 2 === 0 ? base + 1 : base;
+}
 const ADAPT_C = 7; // tuned 2026-05-02 — 10 → 7 더 공격적, 미세 입자 회수
 const MORPH_KERNEL_SIZE = 3;
 
@@ -219,7 +226,8 @@ export async function segmentParticles(
       // 검증 후 다른 접근 (e.g., multi-scale segmentation, sub-pixel 추정)
       // 검토 가능.
 
-      // 2. Adaptive threshold
+      // 2. Adaptive threshold (block size 는 image 해상도 비례)
+      const adaptBlockSize = computeAdaptBlockSize(gray.rows);
       const binary = scope.track(new cv.Mat());
       cv.adaptiveThreshold(
         gray,
@@ -227,7 +235,7 @@ export async function segmentParticles(
         255,
         cv.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv.THRESH_BINARY_INV,
-        ADAPT_BLOCK_SIZE,
+        adaptBlockSize,
         ADAPT_C,
       );
 
@@ -375,7 +383,7 @@ export const _internal = {
   SANITY_MAX_SINGLE_RATIO,
   MASK_MARGIN_MM,
   MAX_PARTICLE_AREA_MM2,
-  ADAPT_BLOCK_SIZE,
+  computeAdaptBlockSize,
   ADAPT_C,
   WATERSHED_SEED_THRESHOLD,
 };
