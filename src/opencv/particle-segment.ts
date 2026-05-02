@@ -22,6 +22,7 @@
  */
 
 import { withMatScope, type Disposable } from "./mat-pool";
+import { imreadFromCanvas } from "./canvas-mat";
 import type { CoinDetection } from "./coin-detect";
 import type { AnalysisError } from "./errors";
 
@@ -167,7 +168,7 @@ export async function segmentParticles(
   return withMatScope(async (scope) => {
     let escaping: { contours?: CvMatVector; hierarchy?: CvMat } = {};
     try {
-      const src = scope.track(cv.imread(canvas));
+      const src = scope.track(imreadFromCanvas(canvas));
       const gray = scope.track(new cv.Mat());
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 

@@ -9,6 +9,7 @@
  */
 
 import { withMatScope } from "./mat-pool";
+import { imreadFromCanvas } from "./canvas-mat";
 import type { AnalysisError } from "./errors";
 
 declare const cv: {
@@ -78,7 +79,7 @@ export async function checkInputQuality(
   canvas: HTMLCanvasElement | OffscreenCanvas,
 ): Promise<InputQualityResult> {
   return withMatScope(async (scope) => {
-    const src = scope.track(cv.imread(canvas));
+    const src = scope.track(imreadFromCanvas(canvas));
     const gray = scope.track(new cv.Mat());
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
@@ -297,7 +298,7 @@ export async function detectCoin(
   coinHint?: { x: number; y: number } | null,
 ): Promise<CoinDetection> {
   return withMatScope(async (scope) => {
-    const src = scope.track(cv.imread(canvas));
+    const src = scope.track(imreadFromCanvas(canvas));
     // grayOriginal: blur 미적용 — sharp edge 보존 → rim gradient 측정용.
     const grayOriginal = scope.track(new cv.Mat());
     cv.cvtColor(src, grayOriginal, cv.COLOR_RGBA2GRAY);
