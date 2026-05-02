@@ -45,7 +45,7 @@ export function HomeRoute() {
               {meta.map((record) => (
                 <li key={record.id} className="home-record-item">
                   <span className="text-body numeric">
-                    D50 {Math.round(record.d50)}μm
+                    분쇄도 {Math.round(record.d50)}μm
                   </span>
                   <span className="text-caption">
                     신뢰도 {Math.round(record.confidence)}/10 ·{" "}

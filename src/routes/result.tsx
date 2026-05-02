@@ -200,7 +200,7 @@ export function ResultRoute() {
             그 뒤 균일도 / 미분. 사용자 친화 라벨 (기술 용어 D10/D50/D90 회피) */}
         <dl className="result-data-inline" aria-label="측정 통계">
           <div>
-            <dt className="text-caption" title="D10 — 작은 입자 10% 경계">
+            <dt className="text-caption" title="입자 크기 하위 10% 경계 — 이 값보다 작은 입자가 10%">
               작은 쪽
             </dt>
             <dd className="text-h4 numeric">
@@ -211,8 +211,8 @@ export function ResultRoute() {
             ·
           </span>
           <div>
-            <dt className="text-caption" title="D50 — 중앙값 (입자 절반의 경계)">
-              중앙
+            <dt className="text-caption" title="중앙값 — 전체 입자의 절반이 이 크기보다 작음">
+              중앙값
             </dt>
             <dd className="text-h4 numeric">
               {Math.round(result.stats.d50)}μm
@@ -222,7 +222,7 @@ export function ResultRoute() {
             ·
           </span>
           <div>
-            <dt className="text-caption" title="D90 — 큰 입자 10% 경계">
+            <dt className="text-caption" title="입자 크기 상위 10% 경계 — 이 값보다 큰 입자가 10%">
               큰 쪽
             </dt>
             <dd className="text-h4 numeric">

@@ -62,18 +62,27 @@ const FINES_THRESHOLD_UM = 300;
 const MAX_PARTICLE_DIAMETER_UM = 15000;
 
 // 클럼프 (덩어리) 분리 임계 — 통계 오염 방지.
-// tuned 2026-05-02 (re-tuned 2026-05-02 with VS3 4-anchor sieve fixtures).
+// tuned 2026-05-02 (revision 3 — V60 핸드드립 정확도 우선 cap 강화).
 // 분쇄가 안 된 덩어리, 추출 후 압착된 퍽 잔여물 등 "정상 입자" 가 아닌 outlier.
 //
-// 정책: French Press (가장 굵은 표준 분쇄도) 의 최대 단일 입자 (~1500μm sieve,
-// image-space ~2000μm 까지 buffer 포함) 초과는 모두 응집으로 간주.
-// 사용자 지시 "프랜치 프레스 용 이상 사이즈로 측정된 값은 제외".
+// **정책 (2026-05-02)**: V60 핸드드립 단일 입자 최대 ≈ 1.5mm physical.
+// > 1.5mm physical 입자가 검출되면 거의 100% 응집/touching → 통계 제외.
 //
-// 이전 multiplier 방식 (D50×4) 은 5.1 espresso 사진에서 양성 피드백 루프 발생:
-// 응집이 D50 을 부풀림 → threshold 도 부풀어 → 응집이 살아남음. 절대 cap 으로 차단.
+// **트레이드오프**:
+//  - cap 1500μm image-space (= 2550μm sieve with ratio 1.7)
+//    → V60 영역 D90/uniformity 정확. french press 1.5-2mm 입자 일부 손실.
+//  - 핸드드립 우선 정책 (사용자 결정) 과 일관 — french press 영역은
+//    confidence 'medium' 라벨로 정확도 한계 안내.
+//
+// **이력**:
+//  - v1: max(2000μm, D50×4) — multiplier 방식. 양성 피드백 루프 (응집이
+//    D50 부풀림 → threshold 도 부풀림 → 응집 살아남음).
+//  - v2: 절대 cap 2000μm. 사용자 지시 "french press 이상 사이즈 제외".
+//    그러나 V60 사진에서 1.5-2mm 응집이 통과해 D90 inflate (실측 1991μm).
+//  - v3 (현재): 절대 cap 1500μm. V60 핸드드립 정확도 우선.
 //
 // MAX_PARTICLE_DIAMETER_UM (15mm) 은 배경(가장자리, 그림자) 필터로 별개 유지.
-const CLUMP_MIN_DIAMETER_UM = 2000;
+const CLUMP_MIN_DIAMETER_UM = 1500;
 
 export function computeStats(
   contours: CvMatVector,

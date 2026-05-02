@@ -46,7 +46,11 @@ export function downsampleImage(
   const canvas = document.createElement("canvas");
   canvas.width = dstW;
   canvas.height = dstH;
-  const ctx = canvas.getContext("2d");
+  // willReadFrequently: OpenCV.js cv.imread() 가 내부적으로 getImageData()
+  // 여러 번 호출 (HoughCircles, threshold, morphology 등). 이 hint 없으면
+  // browser 가 GPU-backed canvas 로 만들어 readback 비용 큼. CPU-side buffer
+  // 로 바인딩되어 readback 빨라짐.
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("downsampleImage: 2d context unavailable");
 
   ctx.drawImage(source, 0, 0, dstW, dstH);

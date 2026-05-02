@@ -233,6 +233,20 @@
     "multi_coin_check": "PASS (count 2 with both coinType paths)",
     "code_health": "typecheck pass / 117 tests pass / lint clean"
   },
+  "calibration_2026_05_02_revision_3_clump_cap_1500": {
+    "context": "ratio 1.7 적용 후 사용자 fixture 11 측정 결과 D50=704μm (V60 표준 700μm 와 일치 ✓) 이지만 D90=1991μm (V60 표준 1300-1500μm 대비 ~30% 높음), uniformity=6.0 (정상 ~5.0).",
+    "diagnosis": {
+      "d50_accurate": "704μm 가 V60 표준 700μm 와 ±1% 일치. 중앙값은 정확.",
+      "d90_inflated": "1991μm sieve = 1171μm image-space. 응집/touching 입자가 1500-2000μm image-space 에서 단일 contour 로 측정되어 D90 부풀림.",
+      "physical_reality": "V60 단일 입자 최대 ≈ 1.5mm physical. >1.5mm physical 입자 검출 = 거의 100% 응집/touching."
+    },
+    "decision": {
+      "what": "CLUMP_MIN_DIAMETER_UM 2000 → 1500 (image-space)",
+      "policy_alignment": "핸드드립 우선 정책과 일관 — V60 영역 정확도 최우선",
+      "trade_off": "french press 1.5-2mm 단일 입자 일부 통계에서 제외. 사용자 의도 'V60 정확도 우선' 과 부합. french press 영역은 confidence 'medium' 라벨로 정확도 한계 안내.",
+      "expected_effect": "fixture 11 D90 1991→~1500 sieve 예상. uniformity 6.0→~4.5 정상화."
+    }
+  },
   "calibration_2026_05_02_revision_2_exif_bug_correction": {
     "context": "Setting 11 fixture 브라우저 검증 시도에서 D50 1366μm sieve = 거침 분류 발견. fixture 측정값 (image D50 198 = sieve 653 = 중간) 과 모순. 원인 추적 결과 tune-pipeline.ts 의 EXIF 처리 버그 발견.",
     "bug_root_cause": {

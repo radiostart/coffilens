@@ -97,7 +97,9 @@ export function CameraRoute() {
       const canvas = document.createElement("canvas");
       canvas.width = bitmap.width;
       canvas.height = bitmap.height;
-      const ctx = canvas.getContext("2d");
+      // willReadFrequently: 다운스트림 OpenCV pipeline (cv.imread + HoughCircles
+      // 등) 이 getImageData 다회 호출. CPU-side buffer 로 readback 가속.
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) throw new Error("2d context unavailable");
       ctx.drawImage(bitmap, 0, 0);
       bitmap.close?.();
