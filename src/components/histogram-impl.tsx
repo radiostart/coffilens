@@ -143,6 +143,18 @@ export default function HistogramImpl({
 }: HistogramImplProps) {
   const data = buildBins(diameters, bins);
 
+  // **동적 Y axis range** (사용자 제안 2026-05-03):
+  // outlier bin (e.g., fines tail 의 1500개) 이 Y 차지해 mid bars 압축되는
+  // 문제 → P75 × 1.5 까지만 표시. 그 이상 bar 는 clip (top 에 닿음).
+  // 효과: 대부분 bar 가 Y 범위 잘 활용 → 100/300 차이 시각화.
+  const sortedCounts = data
+    .map((d) => d.count)
+    .filter((c) => c > 0)
+    .sort((a, b) => a - b);
+  const p75Idx = Math.floor(sortedCounts.length * 0.75);
+  const p75Count = sortedCounts[p75Idx] ?? 1;
+  const countDomainMax = Math.max(1, Math.round(p75Count * 1.5));
+
   if (data.length === 0) {
     return (
       <p
@@ -176,7 +188,7 @@ export default function HistogramImpl({
         d90 !== undefined ? Math.round(d90) : "?"
       }μm`}
     >
-      <ResponsiveContainer width="100%" height={240}>
+      <ResponsiveContainer width="100%" height={280}>
         <ComposedChart
           data={data}
           /*
@@ -188,10 +200,11 @@ export default function HistogramImpl({
            */
           margin={{ top: 32, right: 16, left: 16, bottom: 60 }}
           /*
-           * Bar gap 조정 — barCategoryGap 을 늘려 개별 bar 간격 넓힘 (개별성 강조).
-           * 기본값(10%) → 14%. log scale 에서도 자동 적용.
+           * Bar 사이즈 키움 (사용자 제안 2026-05-03): 14% → 4% gap.
+           * 더 wide 한 bar 로 개별 bar 의 높이 변화 더 잘 보임.
+           * 기본 10% 보다도 좁게 → bar 두께 ↑.
            */
-          barCategoryGap="14%"
+          barCategoryGap="4%"
         >
           <XAxis
             dataKey="range"
@@ -206,13 +219,20 @@ export default function HistogramImpl({
             axisLine={{ stroke: "var(--color-border)" }}
           />
           {/*
-           * Dual Y-axis (2026-05-03 디자인 결정):
-           * - 좌측 (count): Bar 입자 개수, raw count
-           * - 우측 (percent): Line KDE 분포도 %
-           * 둘 다 hide — 시각 noise 줄이고 tooltip + legend 로 정보 제공.
-           * 사용자 요구 "입자 갯수 + 분포 %" 동시 가시화.
+           * Dual Y-axis with **dynamic range** (2026-05-03 재결정):
+           * - 좌측 (count): bar 입자 개수, 동적 domain — outlier 가 Y 차지하지
+           *   않도록 P90 of bin counts × 1.2 까지만 표시. 그 이상 bar 는 clip.
+           *   사용자 제안: dynamic range + bigger bars.
+           * - 우측 (percent): line 분포도 %, linear.
+           * 둘 다 hide — tooltip + legend 로 정보.
            */}
-          <YAxis yAxisId="count" orientation="left" hide />
+          <YAxis
+            yAxisId="count"
+            orientation="left"
+            domain={[0, countDomainMax]}
+            allowDataOverflow
+            hide
+          />
           <YAxis yAxisId="percent" orientation="right" hide />
           <Legend
             verticalAlign="top"
