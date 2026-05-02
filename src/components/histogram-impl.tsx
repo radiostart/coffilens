@@ -33,11 +33,12 @@ interface HistogramBin {
    */
   percentage: number;
   /**
-   * 분포도 percentage — bar 와 동일 데이터의 line 표현. 우측 Y축.
-   * **count === percentage 와 1:1 매칭**: bar 가 높으면 line 높음, bar=0 이면 line=0.
+   * **CDF (Cumulative Distribution Function) — 누적 분포 %**.
+   * Y = "이 크기보다 작은 입자의 누적 비율". 우측 Y축 (0-100%).
    *
-   * 이전 KDE smoothing 시도 → phantom value (데이터 없는 곳 line 표시) 문제.
-   * 직접 percentage 사용으로 해결. Recharts monotone 보간으로 점 사이 자연스러운 곡선.
+   * 산업 표준 (laser diffraction grinder 분석 도구) line series.
+   * bar (density, "어디 많아") 와 complementary 정보 (accumulation, "전체 중 얼마나").
+   * 단조 증가 — D10 위치에서 10%, D50 에서 50%, D90 에서 90% 통과.
    */
   trend: number;
 }
@@ -233,7 +234,16 @@ export default function HistogramImpl({
             allowDataOverflow
             hide
           />
-          <YAxis yAxisId="percent" orientation="right" hide />
+          {/*
+           * CDF axis: 0-100% (cumulative). Line 시작점(~5%)에서 끝점(~95%)
+           * 까지 단조 증가. domain 0-100 명시로 line 의 절대 위치 보존.
+           */}
+          <YAxis
+            yAxisId="percent"
+            orientation="right"
+            domain={[0, 100]}
+            hide
+          />
           <Legend
             verticalAlign="top"
             align="right"
@@ -250,8 +260,9 @@ export default function HistogramImpl({
               if (value === null || value === undefined) return ["—", name];
               const numValue = typeof value === "number" ? value : Number(value);
               if (Number.isNaN(numValue)) return ["—", name];
-              if (name === "분포도 (%)") {
-                return [`${numValue.toFixed(1)}%`, name];
+              if (name === "누적 분포 (%)") {
+                // CDF — "이 크기보다 작은 입자 누적 %"
+                return [`${numValue.toFixed(1)}% 이하`, name];
               }
               if (name === "입자 개수") {
                 // Bar — raw count 값. tooltip 에 percentage 도 함께 표시.
@@ -321,7 +332,7 @@ export default function HistogramImpl({
           <Line
             type="monotone"
             dataKey="trend"
-            name="분포도 (%)"
+            name="누적 분포 (%)"
             yAxisId="percent"
             stroke={TREND_COLOR}
             strokeWidth={3}
@@ -404,14 +415,25 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     ranges.push(Math.round(lo));
   }
 
-  // Percentage = trend = line 값 (bar 와 1:1 동기화).
-  // 이전 KDE smoothing 은 phantom value 문제 발생 → 폐기. 직접 percentage 사용.
+  // Percentage (tooltip 표시용).
   const percentages = counts.map((c) => (c / total) * 100);
+
+  // **CDF (Cumulative Distribution Function)**: line 우측 Y축.
+  // bin i 의 CDF = "bin i 의 우측 가장자리 이하 입자의 누적 %".
+  // outlier (P5 미만) 도 포함하므로 CDF 시작 ~5%, 끝 ~95% (P95 이상 outlier 제외).
+  // bar 의 density 와 complementary — 누적 정보 제공.
+  const firstBinLo = Math.pow(10, logMin);
+  let cumCount = sorted.filter((d) => d < firstBinLo).length;
+  const cdf: number[] = [];
+  for (let i = 0; i < bins; i++) {
+    cumCount += counts[i];
+    cdf.push((cumCount / total) * 100);
+  }
 
   return counts.map((cnt, i) => ({
     range: ranges[i],
     count: cnt, // raw count (bar 좌측 Y축)
     percentage: percentages[i], // % (tooltip)
-    trend: percentages[i], // line 우측 Y축 — bar 와 1:1 매칭
+    trend: cdf[i], // CDF % (line 우측 Y축, 0-100% 단조 증가)
   }));
 }
