@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { computeStats, percentile } from "../../src/opencv/statistics";
+import {
+  computeStats,
+  percentile,
+} from "../../src/opencv/statistics";
 
 interface MockMat {
   delete: ReturnType<typeof vi.fn>;
@@ -101,6 +104,50 @@ describe("computeStats — 가드", () => {
     const contours = setupCvMock([1, 200, 1, 200, 200]);
     const stats = computeStats(contours, 0.05);
     expect(stats.particleCount).toBe(3);
+  });
+
+  it("D50 계산은 sub-200 sieve noise (MAIN_FRACTION_MIN 117 image 미만) 제외", () => {
+    // 2026-05-03 final: MAIN_FRACTION_MIN_UM = 117 image-space (= 200 sieve).
+    // 1-2 pixel sub-pixel noise 만 제외, real signal (4+ pixel area) 모두 포함.
+    //
+    // mmPerPixel = 0.05 가정.
+    // 노이즈 입자 (~100µm image, < 117 threshold) areaPx ≈ 3
+    // 작은 main (~150µm image, > 117) areaPx ≈ 7
+    // 큰 main (~800µm image) areaPx ≈ 200
+    const noiseCount = 30;
+    const smallMainCount = 5;
+    const largeMainCount = 5;
+    const areasPx = [
+      ...Array(noiseCount).fill(3), // ~100µm image (sub-117, noise)
+      ...Array(smallMainCount).fill(7), // ~150µm image (small main, > 117)
+      ...Array(largeMainCount).fill(200), // ~800µm image (large main)
+    ];
+    const contours = setupCvMock(areasPx);
+    const stats = computeStats(contours, 0.05);
+
+    // computeMinDiameter (mmPerPx 0.05) = max(75, min(100, 75)) = 75 image
+    // 노이즈 (~100µm image) 는 minDiameter 통과 (75 이상)
+    // 작은/큰 main 도 minDiameter 통과
+    // 전체 검출 입자: 40 (모두 sieve filter 통과)
+    expect(stats.particleCount).toBe(40);
+    // D50 은 sub-117 image (= sub-200 sieve) 노이즈 제외 후 main fraction (10개)
+    // 의 median = small main (~150 image) ~ large main (~800 image) 중간 영역
+    expect(stats.d50).toBeGreaterThan(150);
+    expect(stats.diameters.length).toBe(40);
+    expect(stats.finesPercent).toBeGreaterThan(0);
+  });
+
+  it("모든 입자가 sub-pixel noise 인 극단 케이스 → fallback (전체로 계산)", () => {
+    // mmPerPixel = 0.05, 모두 ~100µm image (sub-MAIN_FRACTION_MIN 117)
+    // 다만 minDiameter (75 image) 는 통과해야 detection 됨.
+    // fallback: main fraction 비어있어 전체 diameters 로 D50 계산.
+    const areasPx = Array(20).fill(3); // ~100µm image, > minDiameter 75
+    const contours = setupCvMock(areasPx);
+    const stats = computeStats(contours, 0.05);
+    // D50 ~100µm image — main 임계 (117) 미만이지만 fallback 으로 계산됨 (throw X)
+    expect(stats.d50).toBeGreaterThan(0);
+    expect(stats.d50).toBeLessThan(117); // MAIN_FRACTION_MIN_UM 미만
+    expect(stats.particleCount).toBe(20);
   });
 
   it("Fines% 계산 — 300μm 미만 면적 비율", () => {

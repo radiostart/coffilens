@@ -20,6 +20,18 @@ export function CaptureGuideRoute() {
         <p className="text-body capture-guide-description">
           정확한 측정을 위해 아래 4가지를 확인해주세요.
         </p>
+        {/*
+         * 측정 알고리즘이 핸드드립~프렌치프레스 영역 (D50 500-1500µm) 에 최적화.
+         * espresso/Turkish 영역은 sub-pixel 한계로 절대값 신뢰도 낮음 — 사전에
+         * 알려 측정값 해석 기대치 설정. 추천 도구 라벨은 brewing-guide.ts SSOT.
+         */}
+        <aside className="capture-guide-banner" role="note">
+          <span aria-hidden="true">☕</span>
+          <p className="text-body">
+            이 측정은 <strong>핸드드립·프렌치프레스</strong> 분쇄도에 최적화돼
+            있어요. 에스프레소/모카포트 영역은 절대값보다 상대 비교용으로 활용해주세요.
+          </p>
+        </aside>
         <ol className="capture-guide-steps">
           {STEPS.map((step, idx) => (
             <li key={idx} className="capture-guide-step">
@@ -28,6 +40,23 @@ export function CaptureGuideRoute() {
             </li>
           ))}
         </ol>
+        {/*
+         * **미세 입자 측정 팁** (2026-05-03):
+         * 카메라 해상도 한계로 동전이 작게 찍히면 sub-pixel 작은 입자가
+         * 검출에서 제외됨 (statistics.ts computeMinDiameter — 픽셀당 µm
+         * 비례). 사용자가 가까이 찍게 가이드하면 100µm 미세 입자까지 측정
+         * 가능. step 4 ("완전히 보이도록") 와 별도 hint card.
+         */}
+        <aside className="capture-guide-tip" role="note">
+          <span className="capture-guide-tip-icon" aria-hidden="true">💡</span>
+          <div className="capture-guide-tip-body">
+            <p className="capture-guide-tip-title">미세 입자(약 100µm)까지 측정하려면</p>
+            <p className="capture-guide-tip-desc">
+              동전이 화면의 1/3 이상 차도록 가까이 찍어주세요. 멀리 찍으면
+              작은 입자가 픽셀보다 작아져 측정에서 빠집니다.
+            </p>
+          </div>
+        </aside>
         <button
           type="button"
           className="btn-primary capture-guide-cta"

@@ -49,11 +49,26 @@ function buildPayload(event: TelemetryEvent): TelemetryPayload {
   };
 }
 
-function logTypeFor(event: TelemetryEvent): "event" | "error" | "screen" {
-  if (event.type === "measurement_fail" || event.type === "opencv_load_fail") {
+function logTypeFor(
+  event: TelemetryEvent,
+):
+  | "event"
+  | "error"
+  | "screen"
+  | "impression"
+  | "click" {
+  // measurement / opencv / ad load 실패 — error 카운터.
+  if (
+    event.type === "measurement_fail" ||
+    event.type === "opencv_load_fail" ||
+    event.type === "ad_load_fail"
+  ) {
     return "error";
   }
   if (event.type === "app_open") return "screen";
+  // 광고 lifecycle — Toss SDK 표준 log_type.
+  if (event.type === "ad_impression") return "impression";
+  if (event.type === "ad_click") return "click";
   return "event";
 }
 

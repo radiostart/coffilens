@@ -1,0 +1,29 @@
+/*
+ * AdBanner styles (2026-05-03 / F09 Phase 2).
+ *
+ * Toss SDK 가 banner DOM 을 container 에 inject 하므로 외부 컨테이너만 스타일.
+ * 빈 container 일 때 (load 전 / fail) 시각적 빈 공간 차지하지 않도록 min-height
+ * 미설정 — SDK 가 ad slot 을 채우면 자연스럽게 영역 확보.
+ *
+ * data-slot-id: home/result 분기 (현재 동일 스타일, 차후 위치별 조정 가능).
+ */
+.ad-banner {
+  /* 광고 슬롯 — 양쪽 끝까지 stretch, 가운데 정렬. */
+  display: block;
+  width: 100%;
+  margin: 0;
+  /* SDK 가 빈 container 에 padding/border 추가하지 않음 — 우리도 reset. */
+  padding: 0;
+  border: 0;
+  background: transparent;
+  /*
+   * 광고 컨텐츠가 컨테이너 모서리 밖으로 튀는 것 방지.
+   * SDK 가 자체 border-radius 를 적용 — 우리 overflow 는 fail-safe.
+   */
+  overflow: hidden;
+}
+
+.ad-banner:empty {
+  /* SDK 미로드 / 광고 fail → 빈 div. 시각적 흔적 X. */
+  display: none;
+}

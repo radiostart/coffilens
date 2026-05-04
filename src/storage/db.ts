@@ -47,6 +47,12 @@ export interface RecordEntity {
   totalAreaMm2?: number;
   particleCount?: number;
   durationMs?: number;
+  /**
+   * 2026-05-03 추가 — multi-shot averaging 누적 shot 수.
+   * 1 = 단일 측정 (대부분 record), 2~N = N장 평균. UI 에 "N회 측정 평균"
+   * 배지 표시. schema-less 라 v1 그대로, 구 record 는 1로 간주.
+   */
+  shotCount?: number;
 }
 
 export type RecordMeta = Omit<RecordEntity, "thumbnail">;

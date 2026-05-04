@@ -141,18 +141,30 @@ export function buildBrewingGuide(input: {
   }
 
   // caveat 모음:
-  //  1) 측정 신뢰도 (mmPerPixel)
-  //  2) 클럼프 (분쇄 품질)
-  //  3) 균일도 편차
+  //  1) **에스프레소 영역 경고** (2026-05-03 추가) — 본 측정은 핸드드립 최적화
+  //  2) 측정 신뢰도 (mmPerPixel)
+  //  3) 클럼프 (분쇄 품질)
+  //  4) 균일도 편차
   const caveats: string[] = [];
+
+  // **핸드드립 최적화 명시** (2026-05-03 product 결정):
+  // 사용자 대다수가 핸드드립용 → fine grind (에스프레소/모카포트) 영역은
+  // sub-pixel 한계 + fines 비중 높아 측정 정확도 본질적으로 낮음. 명시적으로
+  // 안내해서 사용자가 espresso 측정값을 절대값으로 신뢰하지 않게 함.
+  if (grindClass === "fine") {
+    caveats.push(
+      "이 측정은 핸드드립 분쇄도에 최적화되어 있어요. 에스프레소/모카포트 영역 (미세 분쇄) 은 절대값보다 상대 비교용으로 활용해주세요.",
+    );
+  }
 
   if (measurementConfidence === "low") {
     caveats.push(
       "측정 정확도 낮음 — 동전이 화면의 30% 이상 차지하도록 더 가까이 촬영하면 결과가 더 정확해져요.",
     );
-  } else if (measurementConfidence === "medium") {
+  } else if (measurementConfidence === "medium" && grindClass === "fine") {
+    // 'fine' 일 때만 medium confidence 도 추가 caveat (이미 위에서 fine 경고 있음).
     caveats.push(
-      "fine grind (espresso/moka 영역) 측정 시 미세 입자 일부가 픽셀 한계로 누락될 수 있어요. 가까이 촬영하면 더 정확.",
+      "더 정확하게 측정하려면 동전이 화면 1/3 이상 차도록 가까이 촬영해주세요.",
     );
   }
 

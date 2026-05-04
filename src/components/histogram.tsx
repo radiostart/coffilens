@@ -18,10 +18,12 @@ interface HistogramProps {
 
 export function Histogram({
   diameters,
-  // bins 18 (2026-05-02 final): 25 에서 여전히 빈 bin 발생. P5-P95 범위로
-  // bin 적용 (buildBins) + 18 bins 로 합치기. log-normal 분포의 dense 영역
-  // 시각화 + outlier 는 leftmost/rightmost grey bar 로 별도 표시.
-  bins = 18,
+  // **bins 14** (2026-05-03 — 18 → 14):
+  // 사용자 보고 — 18 bins 시 작은 입자 영역 (~200-300µm) 에 빈 bin 발생.
+  // 원인: 작은 입자는 정수 픽셀 (3, 4, 5...) 라 직경이 quantized → 좁은 bin
+  // 폭이 픽셀 점프보다 좁으면 빈 bin. Sturges 공식 (log₂(2823)+1 ≈ 13) 기준
+  // 14 적정 — 분포 모양 정보 충분 보존하면서 quantization gap hide.
+  bins = 14,
   d10,
   d50,
   d90,

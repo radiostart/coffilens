@@ -74,8 +74,10 @@ describe("buildBrewingGuide — Setting 11 (primary anchor)", () => {
   });
 });
 
-describe("buildBrewingGuide — fine grind + low confidence (5.1 시나리오)", () => {
-  it("sieve 1033μm (mismatch) + medium confidence → 거침 + caveat", () => {
+describe("buildBrewingGuide — coarse grind + medium confidence (5.1 시나리오)", () => {
+  it("sieve 1033μm + medium confidence → 거침 + caveat 없음 (coarse 는 픽셀 한계 무관)", () => {
+    // 2026-05-03 변경: 픽셀 한계 caveat 는 fine grind 에서만 노출.
+    // coarse 측정은 입자 크고 sub-pixel 한계 영향 없음.
     const guide = buildBrewingGuide({
       d50: 1033, // Setting 5.1 re-shot sieve
       uniformity: 5.67,
@@ -85,9 +87,23 @@ describe("buildBrewingGuide — fine grind + low confidence (5.1 시나리오)",
     expect(guide.grindLabel).toBe("거침");
     expect(guide.measurementConfidence).toBe("medium");
     expect(guide.primary).toEqual(["프렌치프레스", "콜드브루"]);
-    // medium confidence → fine grind 측정 caveat 있어야 함
+    // coarse + 균일도/clump 임계 미달 → caveat 없음
+    expect(guide.caveat).toBeUndefined();
+  });
+});
+
+describe("buildBrewingGuide — fine grind 영역 (espresso 경고)", () => {
+  it("D50 300µm (fine) → 핸드드립 최적화 caveat 노출", () => {
+    // 2026-05-03 추가: fine grind 측정 시 항상 espresso 영역 경고 (절대값 신뢰 X)
+    const guide = buildBrewingGuide({
+      d50: 300,
+      uniformity: 4.0,
+      clumpAreaRatio: 5.0,
+      mmPerPixel: 0.045, // high confidence
+    });
+    expect(guide.grindLabel).toBe("미세");
     expect(guide.caveat).toBeDefined();
-    expect(guide.caveat).toContain("픽셀 한계");
+    expect(guide.caveat).toContain("핸드드립");
   });
 });
 

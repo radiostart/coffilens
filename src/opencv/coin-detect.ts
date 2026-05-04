@@ -10,7 +10,12 @@
 
 import { withMatScope } from "./mat-pool";
 import { imreadFromCanvas } from "./canvas-mat";
-import type { AnalysisError } from "./errors";
+import type {
+  AnalysisError,
+  CandidateInfo,
+  CandidatePosition,
+  CandidateRejectReason,
+} from "./errors";
 
 declare const cv: {
   imread: (canvas: HTMLCanvasElement | OffscreenCanvas) => CvMat;
@@ -36,12 +41,14 @@ declare const cv: {
   Laplacian: (src: CvMat, dst: CvMat, ddepth: number) => void;
   meanStdDev: (src: CvMat, mean: CvMat, stddev: CvMat) => void;
   mean: (src: CvMat) => number[];
+  LUT: (src: CvMat, lut: CvMat, dst: CvMat) => void;
   Mat: new (...args: unknown[]) => CvMat;
   MatVector: new (...args: unknown[]) => CvMat;
   Size: new (width: number, height: number) => { width: number; height: number };
   COLOR_RGBA2GRAY: number;
   HOUGH_GRADIENT: number;
   CV_64F: number;
+  CV_8U: number;
 };
 
 interface CvMat {
@@ -167,6 +174,56 @@ const COIN_GRADIENT_STRONG_BYPASS = 50;
 //   napkin 구멍/scattered coffee 가장자리: ~5-15
 const COIN_MIN_RIM_GRADIENT = 18;
 
+// `meanIntensityRingOutside` 가 ring 픽셀 부족(이미지 경계 벗어남) 시 반환하는
+// "exterior 측정 불가" sentinel. 이 값이면 |int-ext| 검증을 통과시킨다.
+const EXTERIOR_SENTINEL_NONE = 999;
+
+/**
+ * 동적 감마 — 어두운 사진에서 HoughCircles 검출률 향상.
+ *
+ * 적용 위치: `coinDetectGray` (HoughCircles 입력) 만. validation
+ * (intensityStatsInCircle / meanRimGradient / meanIntensityRingOutside) 은
+ * 원본 `gray`/`grayOriginal` 사용 — reject 임계 (mean<110 등) 의 의미 보존,
+ * 감마로 false positive 만들지 않음.
+ *
+ * γ < 1: 어두운 영역 lift → Canny 가 어두운 동전 rim edge 검출 ↑.
+ * γ = 1: no-op (충분히 밝은 사진).
+ *
+ * brightness preflight (mean<80 reject) 통과한 [80, ∞) 범위에서만 호출됨.
+ */
+function chooseGamma(meanIntensity: number): number {
+  if (meanIntensity < 100) return 0.55;
+  if (meanIntensity < 140) return 0.75;
+  return 1.0;
+}
+
+const gammaLutCache = new Map<number, Uint8Array>();
+
+function getGammaLUTData(gamma: number): Uint8Array {
+  const key = Math.round(gamma * 100) / 100;
+  const cached = gammaLutCache.get(key);
+  if (cached) return cached;
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    lut[i] = Math.min(255, Math.round(255 * Math.pow(i / 255, gamma)));
+  }
+  gammaLutCache.set(key, lut);
+  return lut;
+}
+
+function applyGamma(src: CvMat, dst: CvMat, gamma: number): void {
+  const lutData = getGammaLUTData(gamma);
+  // eslint-disable-next-line local/no-direct-mat -- short-lived LUT, immediately deleted in finally
+  const lutMat = new cv.Mat(1, 256, cv.CV_8U);
+  try {
+    // OpenCV.js Mat.data 는 Uint8Array view — 직접 set 가능.
+    lutMat.data.set(lutData);
+    cv.LUT(src, lutMat, dst);
+  } finally {
+    lutMat.delete();
+  }
+}
+
 /**
  * 원형 중심부 (반경 r/2) 의 grayscale 평균 + 표준편차 측정.
  * 중심부만 샘플해서 가장자리/배경 오염 최소화.
@@ -282,8 +339,66 @@ function meanIntensityRingOutside(
     }
   }
   // ring 픽셀 부족 (이미지 경계 벗어남) → 외부 검증 못 함, 통과시킴 (filter pass)
-  if (count < 50) return 999;
+  if (count < 50) return EXTERIOR_SENTINEL_NONE;
   return sum / count;
+}
+
+interface AnnotatedCircle {
+  cx: number;
+  cy: number;
+  r: number;
+  mean: number;
+  stddev: number;
+  exterior: number;
+  rimGradient: number;
+}
+
+/**
+ * 후보 원이 동전 filter 를 통과했는지 — 통과하면 null, fail 하면 첫 fail 이유.
+ * `coinCandidates` filter 와 `no_coin` 진단 candidate 분류가 동일 ladder 를 공유.
+ */
+function deriveRejectReason(c: AnnotatedCircle): CandidateRejectReason | null {
+  if (
+    c.mean < COIN_MIN_MEAN_INTENSITY &&
+    c.rimGradient < COIN_GRADIENT_STRONG_BYPASS
+  ) {
+    return "too_dark";
+  }
+  if (c.mean > COIN_MAX_MEAN_INTENSITY) return "too_bright";
+  if (c.stddev > COIN_MAX_STDDEV) return "coffee_cluster";
+  if (
+    c.exterior !== EXTERIOR_SENTINEL_NONE &&
+    c.rimGradient < COIN_GRADIENT_STRONG_BYPASS &&
+    Math.abs(c.mean - c.exterior) > COIN_MAX_INTERIOR_EXTERIOR_DIFF
+  ) {
+    return "low_contrast";
+  }
+  if (c.rimGradient < COIN_MIN_RIM_GRADIENT) return "weak_rim";
+  return null;
+}
+
+const POSITION_GRID = {
+  LT: "좌상단",
+  CT: "위쪽",
+  RT: "우상단",
+  LC: "왼쪽",
+  CC: "가운데",
+  RC: "오른쪽",
+  LB: "좌하단",
+  CB: "아래쪽",
+  RB: "우하단",
+} as const satisfies Record<string, CandidatePosition>;
+
+/** image 폭/높이 1/3 분할 → 9-zone 격자 라벨. UI 친화 (raw px 노출 X). */
+function derivePosition(
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+): CandidatePosition {
+  const xz = cx < w / 3 ? "L" : cx > (2 * w) / 3 ? "R" : "C";
+  const yz = cy < h / 3 ? "T" : cy > (2 * h) / 3 ? "B" : "C";
+  return POSITION_GRID[`${xz}${yz}` as keyof typeof POSITION_GRID];
 }
 
 /**
@@ -327,13 +442,36 @@ export async function detectCoin(
     // 2026-05-02 C2: TARGET_LONG_EDGE 1280→1920 변경에 맞춰 kernel 비례 ↑.
     const blurKernel =
       gray.rows >= 1600 ? 23 : 15; // 1.5x scale at higher resolution
+
+    // **동적 감마 (2026-05-04)**: 어두운 사진에서 HoughCircles 검출률 향상.
+    // coinDetectGray 만 lift — validation 은 원본 gray/grayOriginal 사용해
+    // reject 임계의 의미 보존 (false positive 방지). 효과: 그림자 / 실내 약광
+    // 사진의 동전을 더 많이 찾아 mmPerPixel anchor 가 잡히는 사진 ↑ →
+    // 모든 mm 환산 (D-value, fines%, clumps) 의 정확도 ↑.
+    const photoMean = cv.mean(gray)[0];
+    const gamma = chooseGamma(photoMean);
+
     const coinDetectGray = scope.track(new cv.Mat());
-    cv.GaussianBlur(
-      gray,
-      coinDetectGray,
-      new cv.Size(blurKernel, blurKernel),
-      0,
-    );
+    if (gamma < 1.0) {
+      const lifted = scope.track(new cv.Mat());
+      applyGamma(gray, lifted, gamma);
+      cv.GaussianBlur(
+        lifted,
+        coinDetectGray,
+        new cv.Size(blurKernel, blurKernel),
+        0,
+      );
+      console.log(
+        `[coin-detect] dark photo (mean=${photoMean.toFixed(0)}) → γ=${gamma.toFixed(2)} lift on HoughCircles input only`,
+      );
+    } else {
+      cv.GaussianBlur(
+        gray,
+        coinDetectGray,
+        new cv.Size(blurKernel, blurKernel),
+        0,
+      );
+    }
 
     const circles = scope.track(new cv.Mat());
     cv.HoughCircles(
@@ -368,12 +506,14 @@ export async function detectCoin(
     // 모든 후보의 intensity/exterior/rim gradient 계산 — hint 유무 관계없이
     // 동일하게 검증 (정확도 우선). 사용자 보고: 필터 skip 시 phantom 가까이
     // 있으면 잘못된 동전 선택 → 분쇄도 측정 1.3배 부풀림 회귀.
-    const annotated = sortedCircles.map((c) => {
-      const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
-      const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
-      const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
-      return { ...c, ...interior, exterior, rimGradient };
-    });
+    const annotated: Array<AnnotatedCircle & { reason: CandidateRejectReason | null }> =
+      sortedCircles.map((c) => {
+        const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
+        const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
+        const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
+        const enriched = { ...c, ...interior, exterior, rimGradient };
+        return { ...enriched, reason: deriveRejectReason(enriched) };
+      });
     console.log(
       "[coin-detect] all circles:",
       annotated
@@ -384,26 +524,23 @@ export async function detectCoin(
         .join(" | "),
     );
 
-    const coinCandidates = annotated.filter((c) => {
-      if (c.mean < COIN_MIN_MEAN_INTENSITY) return false;
-      if (c.mean > COIN_MAX_MEAN_INTENSITY) return false;
-      if (c.stddev > COIN_MAX_STDDEV) return false;
-      if (
-        c.exterior !== 999 &&
-        c.rimGradient < COIN_GRADIENT_STRONG_BYPASS
-      ) {
-        const diff = Math.abs(c.mean - c.exterior);
-        if (diff > COIN_MAX_INTERIOR_EXTERIOR_DIFF) return false;
-      }
-      if (c.rimGradient < COIN_MIN_RIM_GRADIENT) return false;
-      return true;
-    });
+    const coinCandidates = annotated.filter((c) => c.reason === null);
     console.log(
-      `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}], stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
+      `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}] OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
     );
 
     if (coinCandidates.length === 0) {
-      throw { kind: "no_coin" } satisfies AnalysisError;
+      // 검출된 모든 원형 후보 + 각 reject 이유 + 위치 라벨 → no_coin 에러에 첨부.
+      // UI 가 v3 패턴 요약 / v2 자세히 expand 로 노출.
+      const candidates: CandidateInfo[] = annotated
+        .filter((c): c is typeof c & { reason: CandidateRejectReason } =>
+          c.reason !== null,
+        )
+        .map((c) => ({
+          position: derivePosition(c.cx, c.cy, gray.cols, gray.rows),
+          rejectReason: c.reason,
+        }));
+      throw { kind: "no_coin", candidates } satisfies AnalysisError;
     }
 
     let selectedCandidate: (typeof coinCandidates)[number];

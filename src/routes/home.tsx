@@ -2,11 +2,15 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { NavBar } from "../components/nav-bar";
 import { EmptyStateCard } from "../components/empty-state-card";
+import { AdBanner } from "../components/ad-banner";
 import { useHistoryStore } from "../stores/history.store";
 import { useMeasurementStore } from "../stores/measurement.store";
 import { getRecord, recordToPipelineResult } from "../storage/records";
 import { _internal as brewingInternal } from "../lib/brewing-guide";
 import "./home.css";
+
+// F09 Phase 2 — 광고 그룹 ID. 미설정 시 banner 미노출 (fail-soft).
+const HOME_AD_GROUP_ID = import.meta.env.VITE_AD_GROUP_HOME;
 
 const { classifyD50 } = brewingInternal;
 
@@ -22,7 +26,7 @@ export function HomeRoute() {
   const load = useHistoryStore((s) => s.load);
   const remove = useHistoryStore((s) => s.remove);
   const setResult = useMeasurementStore((s) => s.setResult);
-  const setArchivedRecordId = useMeasurementStore((s) => s.setArchivedRecordId);
+  const setArchive = useMeasurementStore((s) => s.setArchive);
   const setFrame = useMeasurementStore((s) => s.setFrame);
   const [, setLocation] = useLocation();
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
@@ -39,7 +43,8 @@ export function HomeRoute() {
     // 측정 store 에 archive view 로 주입 — result.tsx 가 그대로 표시.
     setFrame(null);
     setResult(recordToPipelineResult(record));
-    setArchivedRecordId(id);
+    // 구 record 는 shotCount undefined → null (= 1, "N회 측정 평균" 배지 X).
+    setArchive({ recordId: id, shotCount: record.shotCount ?? null });
     setLocation("/result");
   }
 
@@ -146,6 +151,15 @@ export function HomeRoute() {
               })}
             </ul>
           </>
+        )}
+
+        {/*
+         * **F09 Phase 2 — Home AdBanner** (2026-05-03):
+         * records 하단 또는 empty state CTA 아래에 노출. slotId="home" 으로
+         * impression/click/load_fail 추적. adGroupId 미설정 시 fail-soft.
+         */}
+        {HOME_AD_GROUP_ID && (
+          <AdBanner slotId="home" adGroupId={HOME_AD_GROUP_ID} />
         )}
       </main>
     </>

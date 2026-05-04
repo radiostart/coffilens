@@ -1,4 +1,4 @@
-.exit-modal-backdrop {
+.confirm-modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(26, 20, 16, 0.4);
@@ -6,10 +6,10 @@
   align-items: flex-end;
   justify-content: center;
   z-index: 1000;
-  animation: backdrop-fade-in var(--duration-base) var(--ease-enter);
+  animation: confirm-modal-backdrop-fade-in var(--duration-base) var(--ease-enter);
 }
 
-.exit-modal {
+.confirm-modal {
   background: var(--color-bg-surface);
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   padding: var(--space-lg);
@@ -18,21 +18,28 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
-  animation: modal-slide-up var(--duration-base) var(--ease-enter);
+  animation: confirm-modal-slide-up var(--duration-base) var(--ease-enter);
 }
 
-.exit-modal-title {
+.confirm-modal-title {
   text-align: center;
   color: var(--color-text-primary);
   margin-bottom: var(--space-sm);
 }
 
-.exit-modal-actions {
+.confirm-modal-description {
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.confirm-modal-actions {
   display: flex;
   gap: var(--space-sm);
 }
 
-.exit-modal-button {
+.confirm-modal-button {
   flex: 1;
   height: 48px;
   border-radius: var(--radius-sm);
@@ -43,29 +50,29 @@
     transform var(--duration-fast) var(--ease-inout);
 }
 
-.exit-modal-button:active {
+.confirm-modal-button:active {
   transform: scale(0.98);
 }
 
-.exit-modal-cancel {
+.confirm-modal-cancel {
   background: var(--color-primary-subtle);
   color: var(--color-text-primary);
 }
 
-.exit-modal-cancel:hover {
+.confirm-modal-cancel:hover {
   background: var(--color-border);
 }
 
-.exit-modal-confirm {
+.confirm-modal-confirm {
   background: var(--color-primary);
   color: var(--color-text-on-primary);
 }
 
-.exit-modal-confirm:hover {
+.confirm-modal-confirm:hover {
   background: var(--color-primary-hover);
 }
 
-@keyframes backdrop-fade-in {
+@keyframes confirm-modal-backdrop-fade-in {
   from {
     opacity: 0;
   }
@@ -74,7 +81,7 @@
   }
 }
 
-@keyframes modal-slide-up {
+@keyframes confirm-modal-slide-up {
   from {
     transform: translateY(100%);
   }

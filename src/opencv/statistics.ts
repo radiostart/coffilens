@@ -50,26 +50,57 @@ export interface ParticleStats {
   };
 }
 
-// **MIN diameter — adaptive (2026-05-02 C1 개선)**:
+// **MIN diameter — adaptive** (2026-05-02 C1, 2026-05-03 floor 75 raise):
 // 이전 고정 100μm image-space → 픽셀 해상도에 따라 dynamic.
 // 다른 AI 비평: "100μm 이하 fines 누락" 정당. 실제로 mmPerPx 작을 때 (close-up,
 // 동전 크게 보임) 100μm 는 이미 2-3px 라 안전한 검출 가능 → 더 낮춰 fines 회복.
 // mmPerPx 클 때 (멀리 촬영, 동전 작게 보임) 는 100μm 가 1-2px 라 sub-pixel
 // 한계로 자연스럽게 fines 검출 안 됨 — MIN 그대로 100 유지.
 //
-// 즉 **MIN 은 절대 100 초과하지 않게**, 가까이 촬영시만 더 낮춤.
-// 공식: min(100, 1500 × mmPerPx), 하한 50.
-//   mmPerPx 0.030 (5.1 close-up): 1500*0.030=45 → clamp 50 (이전 100 보다 -50%)
-//   mmPerPx 0.045 (V60 close-up): 67.5 → 67μm
-//   mmPerPx 0.069 (moka): 103 → clamp 100 (이전 동일)
-//   mmPerPx 0.10+ (보통/멀리): 150+ → clamp 100 (이전 동일)
+// **2026-05-03 floor raise (50 → 75 image)**:
+// 사용자 ground-truth — V60 16g/220g/3min 정상 추출 그라인드 측정 시 fines%
+// 17.8% 노출 (Hypernova spec 기대 5-10% 의 2x). 1-2픽셀 노이즈 입자 (sub-pixel
+// 한계 이하) 가 fines 로 over-count 되는 문제. floor 75 (= ~127µm sieve) 로
+// 1픽셀 노이즈 제외.
+//
+// 즉 **MIN 은 절대 100 초과하지 않게**, 가까이 촬영시만 더 낮춤 (75 까지).
+// 공식: min(100, 1500 × mmPerPx), 하한 75.
+//   mmPerPx 0.030 (5.1 close-up): 45 → clamp 75 (이전 50)
+//   mmPerPx 0.045 (V60 close-up): 67.5 → clamp 75 (이전 67)
+//   mmPerPx 0.05  (V60 normal):   75 → 75
+//   mmPerPx 0.069 (moka):         103 → clamp 100 (이전 동일)
+//   mmPerPx 0.10+ (보통/멀리):    150+ → clamp 100 (이전 동일)
 function computeMinDiameter(mmPerPixel: number): number {
-  return Math.max(50, Math.min(100, 1500 * mmPerPixel));
+  return Math.max(75, Math.min(100, 1500 * mmPerPixel));
 }
-// image-space 기준 — sieve 표준 fines (<300μm sieve) 와 다름. UI 에서 "미분"
-// 으로 표시되지만 의미는 "측정 직경 ≤ 300μm 작은 입자 면적 비율" 로 같은 분쇄
-// 내 상대 비교용. calibration 변환에 영향받지 않음 (statistics.ts 는 image-space).
+// **finesPercent 임계** — image-space, "미분" 면적 비율 계산용.
+// industry 표준 fines (<300μm sieve) 보다 더 wide 한 정의 (image-space 300 = sieve
+// 510). 같은 분쇄 내 상대 비교용. UI "미분 N%" 로 표시.
 const FINES_THRESHOLD_UM = 300;
+
+// **D-value mainFraction 임계** (2026-05-03 final, signal-quality 기반):
+//
+// image-space 117 = sieve ~200µm = **2 pixel diameter** at typical mmPerPixel.
+// D10/D50/D90 계산 시 사용하는 main fraction 의 하한 — 1-2픽셀 sub-pixel
+// borderline noise 만 제외, 4+ pixel area 의 real 입자 모두 포함.
+//
+// **결정 근거** (사용자 stance "signal quality > value matching"):
+//  픽셀 quantization 분석:
+//    228-259 sieve = 134-152 image = 2-2.2 pixel D, 4 pixel area  → real
+//    295-336 sieve = 174-198 image = 2.6-2.9 pixel D, 5-7 pixel area → real
+//    383+ sieve = 225+ image = 3+ pixel D, 9+ pixel area → real
+//
+//  이전 시도 (176 image = 300 sieve):
+//    228-300 sieve real 입자가 main 에서 제외 — V60 spec 매치 위해 임계 올렸으나
+//    사용자 grinder 가 V60 사용 X → 임계 조정 무효. signal quality 원칙 위배.
+//
+//  117 image (= 2 pixel D) 는 자연스러운 noise floor — sub-pixel artifact 만 제외.
+//  D-값 = 검출된 real 입자의 honest count-based percentile.
+//
+// **finesPercent 와 분리 유지**:
+//  FINES_THRESHOLD_UM (300 image) — UI "미분 N%" 라벨 (industry-friendly)
+//  MAIN_FRACTION_MIN (117 image)  — D-값 계산 (signal-quality threshold)
+const MAIN_FRACTION_MIN_UM = 117;
 // tuned 2026-05-02 for fine grind 500원 fixture, see fixtures/manifest.json
 // 배경 (나무 바닥, 컵받침, napkin 가장자리 그림자) 으로 간주 — 가장 굵은 분쇄도
 // (French Press ~1.2mm) + whole bean (~8mm) 도 충분히 포괄하는 15mm 임계.
@@ -98,6 +129,44 @@ const MAX_PARTICLE_DIAMETER_UM = 15000;
 //
 // MAX_PARTICLE_DIAMETER_UM (15mm) 은 배경(가장자리, 그림자) 필터로 별개 유지.
 const CLUMP_MIN_DIAMETER_UM = 1500;
+
+interface DerivedSummary {
+  d10: number;
+  d50: number;
+  d90: number;
+  uniformity: number;
+  finesPercent: number;
+  clumpAreaRatio: number;
+}
+
+/**
+ * D10/D50/D90 + uniformity + finesPercent + clumpAreaRatio 산출.
+ *
+ * D-값은 sub-pixel noise 제외 (MAIN_FRACTION_MIN_UM = 117 image ≈ 200 sieve).
+ * main fraction 이 비면 (모두 sub-200 인 극단 케이스) 전체 diameters 로 fallback.
+ *
+ * `diameters` 는 정렬된 상태 가정.
+ */
+function summarize(
+  diameters: number[],
+  totalAreaMm2: number,
+  finesAreaMm2: number,
+  clumpAreaMm2: number,
+): DerivedSummary {
+  const mainFraction = diameters.filter((d) => d >= MAIN_FRACTION_MIN_UM);
+  const dValueSource = mainFraction.length > 0 ? mainFraction : diameters;
+  const d10 = percentile(dValueSource, 0.1);
+  const d50 = percentile(dValueSource, 0.5);
+  const d90 = percentile(dValueSource, 0.9);
+  const uniformity = d10 > 0 ? d90 / d10 : Infinity;
+  const finesPercent =
+    totalAreaMm2 > 0 ? (finesAreaMm2 / totalAreaMm2) * 100 : 0;
+  const clumpAreaRatio =
+    totalAreaMm2 + clumpAreaMm2 > 0
+      ? (clumpAreaMm2 / (totalAreaMm2 + clumpAreaMm2)) * 100
+      : 0;
+  return { d10, d50, d90, uniformity, finesPercent, clumpAreaRatio };
+}
 
 export function computeStats(
   contours: CvMatVector,
@@ -173,18 +242,8 @@ export function computeStats(
   }
 
   diameters.sort((a, b) => a - b);
-  const d10 = percentile(diameters, 0.1);
-  const d50 = percentile(diameters, 0.5);
-  const d90 = percentile(diameters, 0.9);
-
-  const uniformity = d10 > 0 ? d90 / d10 : Infinity;
-  const finesPercent =
-    totalAreaMm2 > 0 ? (finesAreaMm2 / totalAreaMm2) * 100 : 0;
-
-  const clumpAreaRatio =
-    totalAreaMm2 + clumpAreaMm2 > 0
-      ? (clumpAreaMm2 / (totalAreaMm2 + clumpAreaMm2)) * 100
-      : 0;
+  const { d10, d50, d90, uniformity, finesPercent, clumpAreaRatio } =
+    summarize(diameters, totalAreaMm2, finesAreaMm2, clumpAreaMm2);
 
   // diagnostic: raw → 필터 breakdown → 통계 입자 수.
   // DEBUG_STATS=1 환경변수 설정 시에만 출력 (production 노이즈 방지).
@@ -227,7 +286,76 @@ export function computeStats(
 }
 
 /**
- * Percentile (linear interpolation between adjacent values).
+ * **Multi-shot averaging — 여러 측정의 ParticleStats 통합** (2026-05-03).
+ *
+ * 같은 분쇄도를 N장 촬영 → 각 shot 의 stats 를 합쳐 더 큰 sample 로 D10/D50/D90
+ * 재계산. shot noise (조명 미세 변화, 입자 배치 우연) 가 √N 으로 줄어 측정 신뢰도
+ * 1.4x (2 shot) ~ 1.7x (3 shot) ↑.
+ *
+ * **결합 로직**:
+ *  - diameters[]      : concat 후 sort → 더 큰 sample 의 percentile (정확도 ↑)
+ *  - particleCount    : sum
+ *  - totalAreaMm2     : sum
+ *  - clumps           : count/area sum, areaRatio 재계산
+ *  - finesPercent     : 면적 가중 합 → fines/total 비율 재계산
+ *  - uniformity       : 새 D90/D10 으로 재계산
+ *
+ * **불변식**:
+ *  - 단일 shot 입력 시 입력과 동일한 stats 반환 (idempotent for size 1)
+ *  - 빈 배열 입력 시 throw
+ *
+ * **주의**: diameters 는 sieve-space (calibration 적용 후) 가정. PipelineResult.stats
+ * 는 이미 sieve 변환 완료 (pipeline.ts:127 applyImageToSieveCalibration).
+ */
+export function combineStats(stats: ParticleStats[]): ParticleStats {
+  if (stats.length === 0) throw new Error("combineStats: 빈 배열");
+  if (stats.length === 1) return stats[0];
+
+  // diameters concat + sort. ~6000 입자 (3 shot × 2000) 정렬 ≈ ~1ms.
+  const allDiameters: number[] = [];
+  let particleCount = 0;
+  let totalAreaMm2 = 0;
+  // 면적 가중 fines: 각 shot 의 finesArea = totalArea × (finesPercent / 100).
+  let finesAreaMm2 = 0;
+  let clumpCount = 0;
+  let clumpAreaMm2 = 0;
+
+  for (const s of stats) {
+    allDiameters.push(...s.diameters);
+    particleCount += s.particleCount;
+    totalAreaMm2 += s.totalAreaMm2;
+    finesAreaMm2 += s.totalAreaMm2 * (s.finesPercent / 100);
+    clumpCount += s.clumps.count;
+    clumpAreaMm2 += s.clumps.totalAreaMm2;
+  }
+
+  if (allDiameters.length === 0) {
+    throw new Error("combineStats: 합쳐진 입자 0개");
+  }
+
+  allDiameters.sort((a, b) => a - b);
+  const { d10, d50, d90, uniformity, finesPercent, clumpAreaRatio } =
+    summarize(allDiameters, totalAreaMm2, finesAreaMm2, clumpAreaMm2);
+
+  return {
+    d10,
+    d50,
+    d90,
+    finesPercent,
+    uniformity,
+    particleCount,
+    totalAreaMm2,
+    diameters: allDiameters,
+    clumps: {
+      count: clumpCount,
+      totalAreaMm2: clumpAreaMm2,
+      areaRatio: clumpAreaRatio,
+    },
+  };
+}
+
+/**
+ * Count-based percentile with linear interpolation between adjacent values.
  *
  * @throws 빈 배열 입력 시
  */
@@ -244,6 +372,7 @@ export function percentile(sorted: number[], p: number): number {
 export const _internal = {
   computeMinDiameter,
   FINES_THRESHOLD_UM,
+  MAIN_FRACTION_MIN_UM,
   MAX_PARTICLE_DIAMETER_UM,
   CLUMP_MIN_DIAMETER_UM,
 };

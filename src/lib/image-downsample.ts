@@ -66,17 +66,27 @@ export function downsampleImage(source: SourceLike): CanvasLike {
   const dstH = Math.round(srcH * scale);
 
   const canvas = createCanvas(dstW, dstH);
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d") as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
   if (!ctx) throw new Error("downsampleImage: 2d context unavailable");
 
+  // **High-quality scaling** (2026-05-03):
+  // Browser default `imageSmoothingQuality="low"` 는 fast bilinear-ish 라
+  // 4000×3000 → 960×1280 (4x 다운샘플) 시 동전 rim 의 sharp gradient 가
+  // 무뎌짐 → HoughCircles accumulator 임계 미달로 detection 실패 사례 발생.
+  //
+  // "high" 는 Chrome bicubic-ish (lanczos 와 비교적 가까움). 같은 사진을
+  // tune-pipeline (sharp lanczos) 와 가까운 결과로 처리 → coin detection
+  // 안정성 ↑, 환경 일관성 ↑.
+  //
+  // 사파리/iOS WebView 에서도 "high" 지원 (TS DOM lib 표준), Chrome 100%.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
   // OffscreenCanvas drawImage 도 동일 시그니처. CanvasImageSource 타입 호환.
-  (ctx as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D).drawImage(
-    source as CanvasImageSource,
-    0,
-    0,
-    dstW,
-    dstH,
-  );
+  ctx.drawImage(source as CanvasImageSource, 0, 0, dstW, dstH);
   return canvas;
 }
 

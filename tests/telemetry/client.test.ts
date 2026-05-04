@@ -93,6 +93,83 @@ describe("TossAdapter", () => {
     // type 자체는 log_name 으로 들어가니 params 에는 X
     expect(params.type).toBeUndefined();
   });
+
+  // **F09 Phase 2 — 광고 텔레메트리** (2026-05-03):
+  describe("광고 이벤트 — log_type 매핑", () => {
+    it("ad_impression → log_type 'impression', slotId/adGroupId 보존", () => {
+      const eventLog = vi.fn();
+      const adapter = new TossAdapter(eventLog);
+
+      adapter.track({
+        type: "ad_impression",
+        slotId: "home",
+        adGroupId: "test_ad_group_001",
+      });
+
+      expect(eventLog).toHaveBeenCalledOnce();
+      const call = eventLog.mock.calls[0][0];
+      expect(call.log_name).toBe("ad_impression");
+      expect(call.log_type).toBe("impression");
+      expect(call.params.slotId).toBe("home");
+      expect(call.params.adGroupId).toBe("test_ad_group_001");
+    });
+
+    it("ad_click → log_type 'click', slotId/adGroupId 보존", () => {
+      const eventLog = vi.fn();
+      const adapter = new TossAdapter(eventLog);
+
+      adapter.track({
+        type: "ad_click",
+        slotId: "result",
+        adGroupId: "test_ad_group_002",
+      });
+
+      const call = eventLog.mock.calls[0][0];
+      expect(call.log_name).toBe("ad_click");
+      expect(call.log_type).toBe("click");
+      expect(call.params.slotId).toBe("result");
+      expect(call.params.adGroupId).toBe("test_ad_group_002");
+    });
+
+    it("ad_load_fail → log_type 'error', errorCode/errorMessage 보존", () => {
+      const eventLog = vi.fn();
+      const adapter = new TossAdapter(eventLog);
+
+      adapter.track({
+        type: "ad_load_fail",
+        slotId: "home",
+        adGroupId: "test_ad_group_003",
+        errorCode: 503,
+        errorMessage: "no_fill",
+      });
+
+      const call = eventLog.mock.calls[0][0];
+      expect(call.log_name).toBe("ad_load_fail");
+      expect(call.log_type).toBe("error");
+      expect(call.params.slotId).toBe("home");
+      expect(call.params.errorCode).toBe(503);
+      expect(call.params.errorMessage).toBe("no_fill");
+    });
+
+    it("home / result slotId 모두 지원", () => {
+      const eventLog = vi.fn();
+      const adapter = new TossAdapter(eventLog);
+
+      adapter.track({
+        type: "ad_impression",
+        slotId: "home",
+        adGroupId: "g1",
+      });
+      adapter.track({
+        type: "ad_impression",
+        slotId: "result",
+        adGroupId: "g2",
+      });
+
+      expect(eventLog.mock.calls[0][0].params.slotId).toBe("home");
+      expect(eventLog.mock.calls[1][0].params.slotId).toBe("result");
+    });
+  });
 });
 
 describe("ConsoleAdapter", () => {

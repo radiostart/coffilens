@@ -33,10 +33,15 @@ const COINS: Coin[] = [
 
 export function CoinSelectRoute() {
   const setCoinType = useMeasurementStore((s) => s.setCoinType);
+  const resetAccumulated = useMeasurementStore((s) => s.resetAccumulated);
   const [, setLocation] = useLocation();
 
   function handleSelect(id: CoinType) {
     setCoinType(id);
+    // 2026-05-03 — 새 측정 사이클 시작 시 multi-shot 누적 비움.
+    // 이전 측정에서 accumulatedStats/appendMode 가 남아있어도 새 cycle 은 fresh.
+    // (방어적: 분석 후 abandon → 다른 사이클 시작 시 cross-contamination 방지)
+    resetAccumulated();
     void getTelemetryClient().then((c) =>
       c.track({ type: "measurement_attempt", coinType: id }),
     );

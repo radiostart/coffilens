@@ -1,0 +1,115 @@
+.histogram-empty {
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.histogram-toggle-wrapper {
+  margin-top: 12px;
+}
+
+.histogram-toggle {
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.histogram-table-wrap {
+  margin-top: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.histogram-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.histogram-table thead tr,
+.histogram-table tr.histogram-table-totals {
+  background: var(--color-primary-subtle);
+}
+
+.histogram-table th {
+  padding: 8px 10px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.histogram-table th.col-range {
+  text-align: left;
+}
+
+.histogram-table th.col-count,
+.histogram-table th.col-percent {
+  text-align: right;
+}
+
+.histogram-table td {
+  padding: 6px 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+.histogram-table td.col-range {
+  text-align: left;
+}
+
+.histogram-table td.col-count,
+.histogram-table td.col-percent {
+  text-align: right;
+}
+
+.histogram-table tr + tr td {
+  border-top: 1px solid var(--color-border);
+}
+
+/* core (D10~D90) row — 강조 */
+.histogram-table tr.histogram-table-core td {
+  color: var(--color-text-primary);
+}
+
+.histogram-table tr.histogram-table-core td.col-count {
+  font-weight: 600;
+}
+
+/* outlier (fines/coarse) row — warning 톤 */
+.histogram-table tr.histogram-table-outlier {
+  background: rgba(201, 123, 63, 0.06);
+}
+
+.histogram-table tr.histogram-table-outlier td.col-range {
+  color: #c97b3f;
+  font-style: italic;
+}
+
+/* non-core, non-outlier 행 — 옅은 zebra */
+.histogram-table tr.histogram-table-side {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* 합계 행 */
+.histogram-table tr.histogram-table-totals td {
+  padding: 8px 10px;
+  font-weight: 600;
+  border-top: 1px solid var(--color-border);
+}
+
+.histogram-table tr.histogram-table-totals td.col-range {
+  color: var(--color-text-secondary);
+}
+
+.histogram-table tr.histogram-table-totals td.col-count {
+  color: var(--color-text-primary);
+}

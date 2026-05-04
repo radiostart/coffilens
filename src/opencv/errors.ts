@@ -7,10 +7,40 @@
  *
  * 모든 throw 는 이 type 만 사용 — switch exhaustive 로 누락 컴파일 타임 차단.
  */
+/**
+ * **CandidateInfo** (2026-05-03) — no_coin 진단 정보.
+ *
+ * HoughCircles 가 원형 후보를 찾았으나 모두 동전 filter 에서 reject 된 경우,
+ * 각 후보의 위치 + reject 이유를 노출 → 사용자가 "왜 동전 인식 안 됐는지"
+ * 즉시 이해. position 은 9-zone 격자, rejectReason 은 한국어 친화 라벨.
+ */
+export type CandidatePosition =
+  | "좌상단"
+  | "우상단"
+  | "좌하단"
+  | "우하단"
+  | "위쪽"
+  | "아래쪽"
+  | "왼쪽"
+  | "오른쪽"
+  | "가운데";
+
+export type CandidateRejectReason =
+  | "coffee_cluster"  // stddev 큼 — 커피 입자 뭉침
+  | "too_dark"        // mean 낮음 + 약한 gradient — 그림자
+  | "too_bright"      // mean 높음 — 동전과 배경 contrast 약함
+  | "weak_rim"        // gradient 약함 — 윤곽 흐림
+  | "low_contrast";   // |int-ext| 큼 — 주변과 contrast 부족
+
+export interface CandidateInfo {
+  position: CandidatePosition;
+  rejectReason: CandidateRejectReason;
+}
+
 export type AnalysisError =
   | { kind: "opencv_load_fail"; cause: "network" | "cors" | "timeout" }
   | { kind: "aborted" }
-  | { kind: "no_coin" }
+  | { kind: "no_coin"; candidates?: CandidateInfo[] }
   | { kind: "multi_coin"; count: number }
   | { kind: "partial_coin" }
   | { kind: "low_brightness"; meanBrightness: number }
@@ -60,6 +90,37 @@ export interface ErrorDetails {
   howToFix: string[];
   /** 디버그용 측정값 (있을 때만 표시) */
   diagnostics?: string;
+  /**
+   * 2026-05-03 추가 — no_coin 진단 정보 (있을 때만).
+   * UI 가 v3 패턴 요약 (warnings/tips) 으로 default 노출, "자세히" 클릭 시
+   * v2 (per-candidate 위치+이유) expand 표시.
+   */
+  candidates?: CandidateInfo[];
+}
+
+/**
+ * Reject reason → 사용자 친화 라벨.
+ * `rejectReasonLabel`: per-candidate 자세한 진단 (v2).
+ * `REJECT_REASON_PATTERN_HINT`: 패턴 요약 (v3, no_coin howToFix 의 ⚠️ 항목).
+ */
+const REJECT_REASON_DETAIL: Record<CandidateRejectReason, string> = {
+  coffee_cluster: "커피 입자 뭉침으로 추정",
+  too_dark: "너무 어두워요 (그림자?)",
+  too_bright: "동전과 배경이 비슷해요",
+  weak_rim: "윤곽이 흐릿해요",
+  low_contrast: "주변과 대비 부족",
+};
+
+const REJECT_REASON_PATTERN_HINT: Record<CandidateRejectReason, string> = {
+  coffee_cluster: "커피 입자가 동전에 너무 가까이 있어요",
+  too_dark: "동전 위에 그림자가 졌어요",
+  too_bright: "동전과 배경 색상이 비슷해요",
+  weak_rim: "동전 윤곽이 흐려요 (흔들림 / 초점)",
+  low_contrast: "동전 주변 대비가 부족해요",
+};
+
+export function rejectReasonLabel(r: CandidateRejectReason): string {
+  return REJECT_REASON_DETAIL[r];
 }
 
 export function errorDetails(e: AnalysisError): ErrorDetails {
@@ -81,17 +142,28 @@ export function errorDetails(e: AnalysisError): ErrorDetails {
         whatHappened: "분석을 취소했어요.",
         howToFix: [],
       };
-    case "no_coin":
+    case "no_coin": {
+      // candidates 의 reject reason 들을 패턴 요약 (v3) 으로 변환 → howToFix 의
+      // ⚠️ 항목으로 표시. 사용자에게 raw radius/coordinate 노출 X, 친화 한국어만.
+      const seen = new Set<CandidateRejectReason>();
+      for (const c of e.candidates ?? []) seen.add(c.rejectReason);
+      const patternHints = [...seen].map((r) => REJECT_REASON_PATTERN_HINT[r]);
+      const howToFix: string[] = [
+        ...patternHints.map((h) => `⚠️ ${h}`),
+        "100원 또는 500원 동전을 흰 종이 위에 함께 두세요.",
+        "동전이 분쇄 커피에 묻히지 않게 옆에 따로 놓아주세요.",
+        "동전이 화면 안에 분명히 보이도록 가까이 찍어주세요.",
+      ];
       return {
         title: "동전을 찾지 못했어요",
         whatHappened:
-          "사진에서 원형 동전을 인식하지 못했어요. 동전이 너무 작거나, 분쇄 커피에 가려졌거나, 화면 밖에 있을 수 있어요.",
-        howToFix: [
-          "100원 또는 500원 동전을 흰 종이 위에 함께 두세요.",
-          "동전이 분쇄 커피에 묻히지 않게 옆에 따로 놓아주세요.",
-          "동전이 화면 안에 분명히 보이도록 가까이 찍어주세요.",
-        ],
+          e.candidates && e.candidates.length > 0
+            ? `사진에서 원형 ${e.candidates.length}개를 봤지만, 동전 특징이 약해요.`
+            : "사진에서 원형 동전을 인식하지 못했어요. 동전이 너무 작거나, 분쇄 커피에 가려졌거나, 화면 밖에 있을 수 있어요.",
+        howToFix,
+        candidates: e.candidates,
       };
+    }
     case "multi_coin":
       return {
         title: "동전이 여러 개 보여요",

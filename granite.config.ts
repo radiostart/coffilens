@@ -5,7 +5,7 @@ export default defineConfig({
   brand: {
     displayName: "커피렌즈",
     primaryColor: "#6B4423", // DESIGN.md --color-primary
-    icon: "", // TODO: 토스 콘솔 등록 시 아이콘 URL 입력
+    icon: "https://static.toss.im/appsintoss/39865/f137571b-ea5a-4d3b-bf60-d00904baca16.png",
   },
   web: {
     host: "localhost",

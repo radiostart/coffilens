@@ -1,15 +1,12 @@
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 import { BrandIcon } from "../components/brand-icon";
-import { getTelemetryClient } from "../telemetry/client";
 import "./intro.css";
 
 export function IntroRoute() {
   const [, setLocation] = useLocation();
 
   useEffect(() => {
-    // app_open 텔레메트리 — fire-and-forget
-    void getTelemetryClient().then((c) => c.track({ type: "app_open" }));
     const t = setTimeout(() => setLocation("/home"), 1500);
     return () => clearTimeout(t);
   }, [setLocation]);

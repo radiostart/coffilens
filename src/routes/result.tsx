@@ -7,12 +7,17 @@ import {
   type ConfidenceVariant,
 } from "../components/confidence-bar";
 import { DisclaimerBanner } from "../components/disclaimer-banner";
+import { AdBanner } from "../components/ad-banner";
+import { ConfirmModal } from "../components/confirm-modal";
 import { useMeasurementStore } from "../stores/measurement.store";
 import { useHistoryStore } from "../stores/history.store";
-import { errorDetails } from "../opencv/errors";
+import { errorDetails, rejectReasonLabel } from "../opencv/errors";
 import { makeThumbnail } from "../lib/thumbnail";
 import { buildBrewingGuide } from "../lib/brewing-guide";
 import "./result.css";
+
+// F09 Phase 2 — 광고 그룹 ID. 미설정 시 banner 미노출 (fail-soft).
+const RESULT_AD_GROUP_ID = import.meta.env.VITE_AD_GROUP_RESULT;
 
 /**
  * 결과 화면 — 순수 측정 결과 표시 (도구별 추천 없음).
@@ -31,8 +36,11 @@ export function ResultRoute() {
   const result = useMeasurementStore((s) => s.result);
   const error = useMeasurementStore((s) => s.error);
   const frame = useMeasurementStore((s) => s.frame);
-  const archivedRecordId = useMeasurementStore((s) => s.archivedRecordId);
-  const setArchivedRecordId = useMeasurementStore((s) => s.setArchivedRecordId);
+  const archive = useMeasurementStore((s) => s.archive);
+  const setArchive = useMeasurementStore((s) => s.setArchive);
+  const accumulatedStats = useMeasurementStore((s) => s.accumulatedStats);
+  const setAppendMode = useMeasurementStore((s) => s.setAppendMode);
+  const resetAccumulated = useMeasurementStore((s) => s.resetAccumulated);
   const saveHistory = useHistoryStore((s) => s.save);
   const removeHistory = useHistoryStore((s) => s.remove);
   const [, setLocation] = useLocation();
@@ -41,8 +49,28 @@ export function ResultRoute() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [cleanedCount, setCleanedCount] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // archive view: 저장된 기록 보기 모드. 측정 저장 CTA 숨기고 삭제 버튼 노출.
-  const isArchived = archivedRecordId !== null;
+  // "한 번 더 측정" 클릭 시 같은 분쇄도 confirm 모달 표시 — user trust 보호:
+  // 다른 분쇄도가 자동 결합되는 silent failure 방지.
+  const [showRetakeConfirm, setShowRetakeConfirm] = useState(false);
+  // no_coin 진단 — v3 default 노출, "자세히" 클릭 시 v2 (per-candidate) expand.
+  const [showDiagDetail, setShowDiagDetail] = useState(false);
+  const isArchived = archive !== null;
+  // archive view 의 shotCount: record 의 shotCount (구 record 는 null = 1).
+  // 신규 측정: accumulatedStats.length.
+  const shotCount = isArchived
+    ? (archive.shotCount ?? 1)
+    : accumulatedStats.length;
+
+  // result 화면을 떠날 때마다 누적/append 상태를 비운다 — 다음 사이클은 fresh.
+  function leaveResult(path: string) {
+    resetAccumulated();
+    setLocation(path);
+  }
+
+  function leaveArchive(path: string) {
+    setArchive(null);
+    setLocation(path);
+  }
 
   // toast 자동 제거
   useEffect(() => {
@@ -62,10 +90,7 @@ export function ResultRoute() {
             {details.whatHappened}
           </p>
           {details.howToFix.length > 0 && (
-            <section
-              className="result-error-fix"
-              aria-label="해결 방법"
-            >
+            <section className="result-error-fix" aria-label="해결 방법">
               <h2 className="text-h3">이렇게 해보세요</h2>
               <ul>
                 {details.howToFix.map((step, i) => (
@@ -76,6 +101,32 @@ export function ResultRoute() {
               </ul>
             </section>
           )}
+          {details.candidates && details.candidates.length > 0 && (
+            <section
+              className="result-error-diag-detail"
+              aria-label="자세한 진단"
+            >
+              <button
+                type="button"
+                className="result-error-diag-toggle"
+                onClick={() => setShowDiagDetail((v) => !v)}
+                aria-expanded={showDiagDetail}
+                aria-controls="diag-detail-list"
+              >
+                {showDiagDetail ? "자세한 진단 닫기 ▲" : "자세한 진단 보기 ▼"}
+              </button>
+              {showDiagDetail && (
+                <ul id="diag-detail-list" className="result-error-diag-list">
+                  {details.candidates.map((c, i) => (
+                    <li key={i} className="text-caption">
+                      <strong>{c.position}</strong> 원형 —{" "}
+                      {rejectReasonLabel(c.rejectReason)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           {details.diagnostics && (
             <p className="text-caption result-error-diag" aria-label="진단 정보">
               📊 {details.diagnostics}
@@ -84,14 +135,14 @@ export function ResultRoute() {
           <button
             type="button"
             className="btn-primary"
-            onClick={() => setLocation("/camera")}
+            onClick={() => leaveResult("/camera")}
           >
             다시 촬영하기
           </button>
           <button
             type="button"
             className="result-secondary"
-            onClick={() => setLocation("/home")}
+            onClick={() => leaveResult("/home")}
           >
             홈으로
           </button>
@@ -152,7 +203,6 @@ export function ResultRoute() {
         finesPercent: result.stats.finesPercent,
         confidence: result.confidence.score,
         coinType: result.coin.coinType,
-        // 2026-05-02 추가 — archive view 에서 히스토그램/추출 가이드 재현용.
         diameters: result.stats.diameters,
         mmPerPixel: result.coin.mmPerPixel,
         clumpsCount: result.stats.clumps.count,
@@ -161,6 +211,7 @@ export function ResultRoute() {
         totalAreaMm2: result.stats.totalAreaMm2,
         particleCount: result.stats.particleCount,
         durationMs: result.durationMs,
+        shotCount,
       });
       setCleanedCount(cleaned);
       setSaved(true);
@@ -171,6 +222,13 @@ export function ResultRoute() {
     }
   }
 
+  const guide = buildBrewingGuide({
+    d50: result.stats.d50,
+    uniformity: result.stats.uniformity,
+    clumpAreaRatio: result.stats.clumps.areaRatio,
+    mmPerPixel: result.coin.mmPerPixel,
+  });
+
   return (
     <>
       <NavBar title="분석 결과" />
@@ -180,9 +238,12 @@ export function ResultRoute() {
           <h1 className="text-display result-diagnosis">
             분쇄도 {Math.round(result.stats.d50)}μm
           </h1>
-          <p className="text-body-large result-tool-fit">
-            전체 입자 중 절반이 이 크기보다 작아요 (중앙값)
-          </p>
+          {/* archive view (저장된 record) 는 단일 stats 로 저장됐으므로 배지 X. */}
+          {shotCount > 1 && (
+            <span className="result-shot-badge">
+              ✨ {shotCount}회 측정 평균 (정확도 ↑)
+            </span>
+          )}
         </header>
 
         {/* 1.5차 신뢰도 바 */}
@@ -197,11 +258,8 @@ export function ResultRoute() {
           }
         />
 
-        {/* 2차 히스토그램 — archive view 에서 구 record 는 diameters[] 없음 */}
-        <section
-          className="result-histogram-section"
-          aria-label="입자 분포"
-        >
+        {/* 2차 히스토그램 — archive view 의 구 record 는 diameters[] 없음 */}
+        <section className="result-histogram-section" aria-label="입자 분포">
           <h2 className="text-h3 result-section-title">입자 분포</h2>
           {result.stats.diameters.length > 0 ? (
             <Histogram
@@ -218,11 +276,13 @@ export function ResultRoute() {
           )}
         </section>
 
-        {/* 3차 inline data list — 작은쪽 → 중앙 → 큰쪽 progression 으로 정렬,
-            그 뒤 균일도 / 미분. 사용자 친화 라벨 (기술 용어 D10/D50/D90 회피) */}
+        {/* 3차 inline data list — 작은쪽 → 중앙 → 큰쪽 progression, 그 뒤 균일도 / 미분 */}
         <dl className="result-data-inline" aria-label="측정 통계">
           <div>
-            <dt className="text-caption" title="입자 크기 하위 10% 경계 — 이 값보다 작은 입자가 10%">
+            <dt
+              className="text-caption"
+              title="입자 크기 하위 10% 경계 — 이 값보다 작은 입자가 10%"
+            >
               작은 쪽
             </dt>
             <dd className="text-h4 numeric">
@@ -233,7 +293,10 @@ export function ResultRoute() {
             ·
           </span>
           <div>
-            <dt className="text-caption" title="중앙값 — 전체 입자의 절반이 이 크기보다 작음">
+            <dt
+              className="text-caption"
+              title="중앙값 — 전체 입자의 절반이 이 크기보다 작음"
+            >
               중앙값
             </dt>
             <dd className="text-h4 numeric">
@@ -244,7 +307,10 @@ export function ResultRoute() {
             ·
           </span>
           <div>
-            <dt className="text-caption" title="입자 크기 상위 10% 경계 — 이 값보다 큰 입자가 10%">
+            <dt
+              className="text-caption"
+              title="입자 크기 상위 10% 경계 — 이 값보다 큰 입자가 10%"
+            >
               큰 쪽
             </dt>
             <dd className="text-h4 numeric">
@@ -281,7 +347,6 @@ export function ResultRoute() {
           </div>
         </dl>
 
-        {/* warnings (있을 때만) */}
         {warnings.length > 0 && (
           <ul className="result-warnings" aria-label="경고">
             {warnings.map((w, i) => (
@@ -293,57 +358,42 @@ export function ResultRoute() {
         )}
 
         {/* 2차 — 분포 기반 추출법 가이드 */}
-        {(() => {
-          const guide = buildBrewingGuide({
-            d50: result.stats.d50,
-            uniformity: result.stats.uniformity,
-            clumpAreaRatio: result.stats.clumps.areaRatio,
-            mmPerPixel: result.coin.mmPerPixel,
-          });
-          return (
-            <section
-              className="result-brewing-guide"
-              aria-label="추출 가이드"
-            >
-              <h2 className="text-h3 result-section-title">
-                ☕ 어떻게 추출할까요?{" "}
-                <span className="result-grind-label">{guide.grindLabel}</span>
-              </h2>
-              <div className="result-guide-row">
-                <span className="result-guide-tag tag-primary">추천</span>
-                <span className="text-body">{guide.primary.join(" · ")}</span>
-              </div>
-              {guide.secondary.length > 0 && (
-                <div className="result-guide-row">
-                  <span className="result-guide-tag tag-secondary">차선</span>
-                  <span className="text-body">
-                    {guide.secondary.join(" · ")}
-                  </span>
-                </div>
-              )}
-              {guide.avoid.length > 0 && (
-                <div className="result-guide-row">
-                  <span className="result-guide-tag tag-avoid">비추</span>
-                  <span className="text-body result-guide-avoid">
-                    {guide.avoid.join(" · ")}
-                  </span>
-                </div>
-              )}
-              {guide.caveat && (
-                <p className="text-caption result-guide-caveat">
-                  ⚠️ {guide.caveat}
-                </p>
-              )}
-              {result.stats.clumps.count > 0 && (
-                <p className="text-caption result-clumps-meta">
-                  🔸 클럼프 {result.stats.clumps.count}개 (
-                  {result.stats.clumps.totalAreaMm2.toFixed(0)}mm²,{" "}
-                  {result.stats.clumps.areaRatio.toFixed(1)}%) 통계에서 제외됨
-                </p>
-              )}
-            </section>
-          );
-        })()}
+        <section className="result-brewing-guide" aria-label="추출 가이드">
+          <h2 className="text-h3 result-section-title">
+            ☕ 어떻게 추출할까요?{" "}
+            <span className="result-grind-label">{guide.grindLabel}</span>
+          </h2>
+          <div className="result-guide-row">
+            <span className="result-guide-tag tag-primary">추천</span>
+            <span className="text-body">{guide.primary.join(" · ")}</span>
+          </div>
+          {guide.secondary.length > 0 && (
+            <div className="result-guide-row">
+              <span className="result-guide-tag tag-secondary">차선</span>
+              <span className="text-body">{guide.secondary.join(" · ")}</span>
+            </div>
+          )}
+          {guide.avoid.length > 0 && (
+            <div className="result-guide-row">
+              <span className="result-guide-tag tag-avoid">비추</span>
+              <span className="text-body result-guide-avoid">
+                {guide.avoid.join(" · ")}
+              </span>
+            </div>
+          )}
+          {guide.caveat && (
+            <p className="text-caption result-guide-caveat">
+              ⚠️ {guide.caveat}
+            </p>
+          )}
+          {result.stats.clumps.count > 0 && (
+            <p className="text-caption result-clumps-meta">
+              🔸 클럼프 {result.stats.clumps.count}개 (
+              {result.stats.clumps.totalAreaMm2.toFixed(0)}mm²,{" "}
+              {result.stats.clumps.areaRatio.toFixed(1)}%) 통계에서 제외됨
+            </p>
+          )}
+        </section>
 
         {/* 3차 검출 동전 메타 */}
         <p className="text-caption result-coin-meta">
@@ -354,7 +404,10 @@ export function ResultRoute() {
         {/* 3차 sticky 디스클레이머 */}
         <DisclaimerBanner />
 
-        {/* CTA */}
+        {RESULT_AD_GROUP_ID && (
+          <AdBanner slotId="result" adGroupId={RESULT_AD_GROUP_ID} />
+        )}
+
         {saveError && (
           <p
             role="alert"
@@ -365,12 +418,11 @@ export function ResultRoute() {
           </p>
         )}
         {isArchived ? (
-          /* Archive view — 저장된 기록 보기. 저장 CTA 숨김, 삭제 버튼 노출. */
           <>
             <button
               type="button"
               className="btn-primary result-save-cta"
-              onClick={() => setLocation("/coin-select")}
+              onClick={() => leaveArchive("/coin-select")}
             >
               새 측정 시작
             </button>
@@ -383,10 +435,9 @@ export function ResultRoute() {
                   setTimeout(() => setConfirmDelete(false), 5000);
                   return;
                 }
-                if (archivedRecordId) {
-                  await removeHistory(archivedRecordId);
-                  setArchivedRecordId(null);
-                  setLocation("/home");
+                if (archive) {
+                  await removeHistory(archive.recordId);
+                  leaveArchive("/home");
                 }
               }}
             >
@@ -395,10 +446,7 @@ export function ResultRoute() {
             <button
               type="button"
               className="result-secondary"
-              onClick={() => {
-                setArchivedRecordId(null);
-                setLocation("/home");
-              }}
+              onClick={() => leaveArchive("/home")}
             >
               홈으로
             </button>
@@ -414,12 +462,20 @@ export function ResultRoute() {
             >
               측정 저장
             </button>
+            {/* "한 번 더 측정" — 같은 분쇄도 confirm 후 appendMode=true 로 /camera. */}
+            <button
+              type="button"
+              className="result-retake-cta"
+              onClick={() => setShowRetakeConfirm(true)}
+            >
+              ✨ 한 번 더 측정 (정확도 ↑)
+            </button>
             <button
               type="button"
               className="result-secondary"
-              onClick={() => setLocation("/camera")}
+              onClick={() => leaveResult("/camera")}
             >
-              다시 촬영
+              다시 촬영 (새 측정)
             </button>
             <button
               type="button"
@@ -440,7 +496,8 @@ export function ResultRoute() {
                 ✓ 측정 기록이 저장되었어요
                 {cleanedCount > 0 && (
                   <span className="text-caption">
-                    {" "}· 오래된 기록 {cleanedCount}개를 정리했어요
+                    {" "}
+                    · 오래된 기록 {cleanedCount}개를 정리했어요
                   </span>
                 )}
               </p>
@@ -448,20 +505,34 @@ export function ResultRoute() {
             <button
               type="button"
               className="result-secondary"
-              onClick={() => setLocation("/camera")}
+              onClick={() => leaveResult("/camera")}
             >
               다시 촬영
             </button>
             <button
               type="button"
               className="result-secondary"
-              onClick={() => setLocation("/home")}
+              onClick={() => leaveResult("/home")}
             >
               홈으로
             </button>
           </>
         )}
       </main>
+
+      <ConfirmModal
+        open={showRetakeConfirm}
+        title="같은 분쇄도인가요?"
+        description="한 번 더 같은 분쇄도를 촬영하면 측정 정확도가 올라가요. 분쇄도가 다르면 결과가 부정확해져요."
+        cancelLabel="취소"
+        confirmLabel="네, 같은 분쇄도예요"
+        onCancel={() => setShowRetakeConfirm(false)}
+        onConfirm={() => {
+          setAppendMode(true);
+          setShowRetakeConfirm(false);
+          setLocation("/camera");
+        }}
+      />
     </>
   );
 }

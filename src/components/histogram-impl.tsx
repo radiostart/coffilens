@@ -1,9 +1,8 @@
+import { useMemo, useState } from "react";
 import {
   Bar,
   Cell,
   ComposedChart,
-  Legend,
-  Line,
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
@@ -11,6 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import "./histogram-impl.css";
 
 interface HistogramImplProps {
   diameters: number[];
@@ -21,59 +21,40 @@ interface HistogramImplProps {
 }
 
 interface HistogramBin {
-  /** Bin 의 왼쪽 가장자리 (X축 위치, μm) */
+  /** Bin 의 왼쪽 가장자리 (X축 위치, μm). outlier bin 은 log-space 가상 위치. */
   range: number;
-  /**
-   * 이 bin 에 속한 raw 입자 개수. Bar dataKey, 좌측 Y축 (count).
-   * 사용자 mental model: "이 구간에 N개 입자".
-   */
+  /** Bin 의 오른쪽 가장자리 (μm). 테이블 구간 표시용. */
+  rangeMax: number;
+  /** 이 bin 에 속한 raw 입자 개수. Bar dataKey, Y축. */
   count: number;
-  /**
-   * 이 bin 의 percentage of total — count / total × 100. tooltip 표시용.
-   */
+  /** count / total × 100. tooltip + 테이블 표시용. */
   percentage: number;
   /**
-   * **CDF (Cumulative Distribution Function) — 누적 분포 %**.
-   * Y = "이 크기보다 작은 입자의 누적 비율". 우측 Y축 (0-100%).
-   *
-   * 산업 표준 (laser diffraction grinder 분석 도구) line series.
-   * bar (density, "어디 많아") 와 complementary 정보 (accumulation, "전체 중 얼마나").
-   * 단조 증가 — D10 위치에서 10%, D50 에서 50%, D90 에서 90% 통과.
+   * "fines"  = lowerBound 미만 (작은 outlier),
+   * "coarse" = upperBound 초과 (큰 outlier),
+   * undefined = 정규 dense bin.
    */
-  trend: number;
+  outlier?: "fines" | "coarse";
+  /** outlier bin 의 실제 최소값 (table 표시용). dense bin 은 undefined. */
+  actualMin?: number;
+  /** outlier bin 의 실제 최대값. */
+  actualMax?: number;
 }
 
-/**
- * Histogram 색상 — DESIGN.md 토큰과 동기화.
- *
- *   PRIMARY_STRONG     `--color-primary` (#6B4423)              — Bar 핵심 영역 (D10~D90)
- *   PRIMARY_SUBTLE     #6B4423 의 alpha 0.32                    — Bar outlier 영역 (옅게)
- *   TREND_COLOR        `--color-success` (#4A8B5C)              — 분포 추세선
- *   TREND_OUTLINE      흰색 (#FFFFFF)                           — 추세선 가독성 outline
- *   BAND_COLOR         `--color-success` 의 alpha 0.07          — D10~D90 highlight band
- *   MARKER_COLOR       `--color-warning` (#C97B3F)              — D10/D90 marker
- *   MARKER_STRONG      `--color-warning` 진한 톤 (#A85F2E)      — D50 marker (강조)
- *   LABEL_COLOR        `--color-text-primary` (#1A1410)         — 라벨 한국어
- *   VALUE_COLOR        `--color-text-secondary` (#6B6157)       — 값 (μm)
- *
- * **2026-05-02 시각 위계 강화 (5-layer plan)**:
- *  1. Highlight band (D10~D90 옅은 success-bg) — 핵심 영역 시각 인지
- *  2. Outlier bar 옅게 (alpha 0.32) — D10 미만 / D90 초과 시각 weight ↓
- *  3. Trend line outline (white stroke 5px + green stroke 3px paint-order)
- *     → 어떤 배경 위에서도 명확
- *  4. D50 marker 차별화 (다른 marker 보다 굵은 line + bold label)
- *  5. Bar gap + radius 미세 조정 (개별성 강조)
- *
- * 정보 layer 분리:
- *  - Bar (count, 갈색)            — 분포 절대값
- *  - Line (trend, 녹색 + outline) — 분포 전반적인 추세 (moving average)
- *  - ReferenceArea (band)         — D10~D90 의미 영역
- *  - ReferenceLine (D10/D50/D90)  — 위치 marker (D50 강조)
- *  - X축 아래 marker label        — ▼ + 한국어 + μm 값
- */
+interface AnnotatedBin extends HistogramBin {
+  displayCount: number;
+  inCore: boolean;
+}
+
+// 200µm 미만은 sub-pixel noise — main bin 에서 빼고 fines outlier 로 collapse.
+// computeStats 의 FINES_THRESHOLD 와 별개 (binning 표시용).
+const MIN_DISPLAY_DIAMETER_UM = 200;
+// outlier bin 이 Y 차지해 mid bars 압축되는 문제 방지 — P75 × 1.5 까지만 표시.
+const Y_AXIS_PERCENTILE = 0.75;
+const Y_AXIS_DOMAIN_MULTIPLIER = 1.5;
+
 const PRIMARY_STRONG = "#6B4423";
-const PRIMARY_SUBTLE = "rgba(107, 68, 35, 0.32)";
-const TREND_COLOR = "#4A8B5C";
+const PRIMARY_SUBTLE = "rgba(107, 68, 35, 0.20)";
 const BAND_COLOR = "rgba(74, 139, 92, 0.07)";
 const MARKER_COLOR = "#C97B3F";
 const MARKER_STRONG = "#A85F2E";
@@ -81,14 +62,10 @@ const LABEL_COLOR = "#1A1410";
 const VALUE_COLOR = "#6B6157";
 
 /**
- * X축 아래 marker — ▼ 화살표 + 한국어 라벨 + μm 값 (3행 텍스트).
+ * X축 아래 marker — ▼ + 한국어 라벨 + μm 값 (3행 텍스트). D50 은 "strong" variant.
  *
- * variant="strong" (D50 전용) — 굵은 ▼ + label fontWeight 700 + 진한 색.
- * variant="default" (D10/D90) — 일반 강조.
- *
- * Recharts ReferenceLine 의 `label` 슬롯에 React element 전달 시 viewBox 는
- * 라인의 절대 좌표 (x = 라인 위치, y = chart top, height = chart height).
- * 라벨은 차트 영역 **아래** (y + height + offset) 에 그려져 Bar 와 충돌 X.
+ * Recharts ReferenceLine `label` 슬롯은 viewBox 로 라인 절대 좌표 (x = 라인 위치,
+ * y = chart top, height = chart height) 전달. Bar 와 충돌 X.
  */
 function MarkerLabel(props: {
   viewBox?: { x: number; y: number; height: number };
@@ -98,7 +75,7 @@ function MarkerLabel(props: {
 }) {
   const { viewBox, title, value, variant = "default" } = props;
   if (!viewBox) return null;
-  const baseY = viewBox.y + viewBox.height; // X축 라인 위치
+  const baseY = viewBox.y + viewBox.height;
   const isStrong = variant === "strong";
   return (
     <g aria-hidden="true">
@@ -142,32 +119,38 @@ export default function HistogramImpl({
   d50,
   d90,
 }: HistogramImplProps) {
-  const data = buildBins(diameters, bins);
+  const [expanded, setExpanded] = useState(false);
 
-  // **동적 Y axis range** (사용자 제안 2026-05-03):
-  // outlier bin (e.g., fines tail 의 1500개) 이 Y 차지해 mid bars 압축되는
-  // 문제 → P75 × 1.5 까지만 표시. 그 이상 bar 는 clip (top 에 닿음).
-  // 효과: 대부분 bar 가 Y 범위 잘 활용 → 100/300 차이 시각화.
-  const sortedCounts = data
-    .map((d) => d.count)
-    .filter((c) => c > 0)
-    .sort((a, b) => a - b);
-  const p75Idx = Math.floor(sortedCounts.length * 0.75);
-  const p75Count = sortedCounts[p75Idx] ?? 1;
-  const countDomainMax = Math.max(1, Math.round(p75Count * 1.5));
+  const { data, countDomainMax, totalCount } = useMemo(() => {
+    const rawData = buildBins(diameters, bins);
+    const sortedCounts = rawData
+      .map((d) => d.count)
+      .filter((c) => c > 0)
+      .sort((a, b) => a - b);
+    const p75Idx = Math.floor(sortedCounts.length * Y_AXIS_PERCENTILE);
+    const p75Count = sortedCounts[p75Idx] ?? 1;
+    const cap = Math.max(1, Math.round(p75Count * Y_AXIS_DOMAIN_MULTIPLIER));
+
+    // recharts 의 domain max + clipPath 가 라운드 corner 를 같이 잘라내므로
+    // displayCount 로 데이터 자체를 cap. tooltip/table 은 raw `count` 사용.
+    const annotated: AnnotatedBin[] = rawData.map((b) => ({
+      ...b,
+      displayCount: Math.min(b.count, cap),
+      inCore:
+        !b.outlier &&
+        d10 !== undefined &&
+        d90 !== undefined &&
+        b.range >= d10 &&
+        b.range <= d90,
+    }));
+    const total = rawData.reduce((sum, d) => sum + d.count, 0);
+    return { data: annotated, countDomainMax: cap, totalCount: total };
+  }, [diameters, bins, d10, d90]);
 
   if (data.length === 0) {
-    return (
-      <p
-        className="text-caption"
-        style={{ color: "var(--color-text-secondary)", textAlign: "center" }}
-      >
-        표시할 데이터가 없어요.
-      </p>
-    );
+    return <p className="text-caption histogram-empty">표시할 데이터가 없어요.</p>;
   }
 
-  // X축 아래 marker — D10/D50/D90. variant 분기로 D50 강조.
   const markers: Array<{
     x: number;
     title: string;
@@ -192,63 +175,25 @@ export default function HistogramImpl({
       <ResponsiveContainer width="100%" height={280}>
         <ComposedChart
           data={data}
-          /*
-           * margin:
-           *   top    8  — 최대 Bar 위쪽 여유
-           *   right  16 — X축 마지막 marker 라벨 우측 잘림 방지
-           *   left   16 — X축 첫 marker 라벨 좌측 잘림 방지
-           *   bottom 60 — ▼ + 한국어 + μm 3줄 라벨 영역
-           */
           margin={{ top: 32, right: 16, left: 16, bottom: 60 }}
-          /*
-           * Bar 사이즈 키움 (사용자 제안 2026-05-03): 14% → 4% gap.
-           * 더 wide 한 bar 로 개별 bar 의 높이 변화 더 잘 보임.
-           * 기본 10% 보다도 좁게 → bar 두께 ↑.
-           */
-          barCategoryGap="4%"
+          barCategoryGap="20%"
         >
+          {/* 커피 분쇄는 log-normal (Rosin-Rammler) — log scale 이 자연스러운 bell. */}
           <XAxis
             dataKey="range"
             type="number"
-            /*
-             * scale="log" — 커피 분쇄 입자 분포는 log-normal 표준 (Rosin-Rammler).
-             * D50 가운데 가까이 + bell 모양 시각화. buildBins 의 log binning 과 짝.
-             */
             scale="log"
             domain={["dataMin", "dataMax"]}
             tick={false}
             axisLine={{ stroke: "var(--color-border)" }}
           />
-          {/*
-           * Dual Y-axis with **dynamic range** (2026-05-03 재결정):
-           * - 좌측 (count): bar 입자 개수, 동적 domain — outlier 가 Y 차지하지
-           *   않도록 P90 of bin counts × 1.2 까지만 표시. 그 이상 bar 는 clip.
-           *   사용자 제안: dynamic range + bigger bars.
-           * - 우측 (percent): line 분포도 %, linear.
-           * 둘 다 hide — tooltip + legend 로 정보.
-           */}
+          {/* 동적 Y range — outlier 가 Y 차지하지 않도록 cap, 초과 bar 는 clip. */}
           <YAxis
             yAxisId="count"
             orientation="left"
             domain={[0, countDomainMax]}
             allowDataOverflow
             hide
-          />
-          {/*
-           * CDF axis: 0-100% (cumulative). Line 시작점(~5%)에서 끝점(~95%)
-           * 까지 단조 증가. domain 0-100 명시로 line 의 절대 위치 보존.
-           */}
-          <YAxis
-            yAxisId="percent"
-            orientation="right"
-            domain={[0, 100]}
-            hide
-          />
-          <Legend
-            verticalAlign="top"
-            align="right"
-            iconSize={10}
-            wrapperStyle={{ paddingBottom: 4, fontSize: 12 }}
           />
           <Tooltip
             contentStyle={{
@@ -260,26 +205,20 @@ export default function HistogramImpl({
               if (value === null || value === undefined) return ["—", name];
               const numValue = typeof value === "number" ? value : Number(value);
               if (Number.isNaN(numValue)) return ["—", name];
-              if (name === "누적 분포 (%)") {
-                // CDF — "이 크기보다 작은 입자 누적 %"
-                return [`${numValue.toFixed(1)}% 이하`, name];
-              }
               if (name === "입자 개수") {
-                // Bar — raw count 값. tooltip 에 percentage 도 함께 표시.
-                const pct = (item?.payload as { percentage?: number })
-                  ?.percentage;
-                const pctStr = typeof pct === "number" ? ` (${pct.toFixed(1)}%)` : "";
-                return [`${Math.round(numValue)}개${pctStr}`, name];
+                const payload = item?.payload as
+                  | { count?: number; percentage?: number }
+                  | undefined;
+                const actualCount = payload?.count ?? Math.round(numValue);
+                const pct = payload?.percentage;
+                const pctStr =
+                  typeof pct === "number" ? ` (${pct.toFixed(1)}%)` : "";
+                return [`${actualCount}개${pctStr}`, name];
               }
               return [`${numValue}`, name];
             }}
             labelFormatter={(label) => `${label}μm 부터`}
           />
-          {/*
-           * Layer 1: Highlight band (D10~D90 핵심 영역).
-           * 옅은 success 배경 — "여기가 분쇄의 의미 있는 영역" 시각 인지.
-           * Bar/Line 보다 먼저 (뒤에) 그려짐 → bar 위에 묻히지 않음.
-           */}
           {d10 !== undefined && d90 !== undefined && (
             <ReferenceArea
               yAxisId="count"
@@ -290,60 +229,21 @@ export default function HistogramImpl({
               ifOverflow="extendDomain"
             />
           )}
-          {/*
-           * Layer 2: Bar (좌측 Y축 = 입자 개수). D10~D90 영역은 강한 색, outlier 영역은 옅게.
-           */}
           <Bar
-            dataKey="count"
+            dataKey="displayCount"
             name="입자 개수"
             yAxisId="count"
             fill={PRIMARY_STRONG}
             radius={[6, 6, 0, 0]}
             isAnimationActive={false}
           >
-            {data.map((entry, i) => {
-              const inCore =
-                d10 !== undefined &&
-                d90 !== undefined &&
-                entry.range >= d10 &&
-                entry.range <= d90;
-              return (
-                <Cell
-                  key={`bar-${i}`}
-                  fill={inCore ? PRIMARY_STRONG : PRIMARY_SUBTLE}
-                />
-              );
-            })}
+            {data.map((entry, i) => (
+              <Cell
+                key={`bar-${i}`}
+                fill={entry.inCore ? PRIMARY_STRONG : PRIMARY_SUBTLE}
+              />
+            ))}
           </Bar>
-          {/*
-           * Layer 3: Trend line (우측 Y축 = 분포도 %). 흰 outline + 녹색 stroke.
-           */}
-          <Line
-            type="monotone"
-            dataKey="trend"
-            yAxisId="percent"
-            stroke="#FFFFFF"
-            strokeWidth={5}
-            dot={false}
-            isAnimationActive={false}
-            legendType="none"
-            tooltipType="none"
-          />
-          <Line
-            type="monotone"
-            dataKey="trend"
-            name="누적 분포 (%)"
-            yAxisId="percent"
-            stroke={TREND_COLOR}
-            strokeWidth={3}
-            dot={false}
-            isAnimationActive={false}
-          />
-          {/*
-           * Layer 4: D10/D50/D90 vertical marker.
-           * D50 (variant="strong") — 굵은 line + 진한 색 + bold label.
-           * D10/D90 (variant="default") — 일반 강조.
-           */}
           {markers.map((m) => {
             const isStrong = m.variant === "strong";
             return (
@@ -367,31 +267,102 @@ export default function HistogramImpl({
           })}
         </ComposedChart>
       </ResponsiveContainer>
+
+      <div className="histogram-toggle-wrapper">
+        <button
+          type="button"
+          className="histogram-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-controls="histogram-data-table"
+        >
+          <span>구간별 데이터 {expanded ? "닫기" : "펼치기"}</span>
+          <span aria-hidden="true">{expanded ? "▲" : "▼"}</span>
+        </button>
+        {expanded && (
+          <div
+            id="histogram-data-table"
+            role="region"
+            aria-label="구간별 입자 분포 데이터"
+            className="histogram-table-wrap"
+          >
+            <table className="histogram-table">
+              <thead>
+                <tr>
+                  <th scope="col" className="col-range">
+                    구간 (μm)
+                  </th>
+                  <th scope="col" className="col-count">
+                    개수
+                  </th>
+                  <th scope="col" className="col-percent">
+                    비율
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((bin, i) => {
+                  const isOutlier = bin.outlier !== undefined;
+                  // outlier 행은 actualMin~actualMax 으로 실제 측정 입자 범위 노출
+                  // → 사용자가 검출 한계 ("최소 170µm 까지만 측정") 시각 인지 가능.
+                  const rangeText = isOutlier
+                    ? bin.outlier === "fines"
+                      ? `${bin.actualMin} ~ ${bin.actualMax} (작은쪽)`
+                      : `${bin.actualMin} ~ ${bin.actualMax} (큰쪽)`
+                    : `${bin.range} ~ ${bin.rangeMax}`;
+                  const rowClass = isOutlier
+                    ? "histogram-table-outlier"
+                    : bin.inCore
+                      ? "histogram-table-core"
+                      : "histogram-table-side";
+                  return (
+                    <tr key={`row-${i}`} className={rowClass}>
+                      <td className="col-range">{rangeText}</td>
+                      <td className="col-count">{bin.count}</td>
+                      <td className="col-percent">
+                        {bin.percentage.toFixed(1)}%
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr className="histogram-table-totals">
+                  <td className="col-range">합계</td>
+                  <td className="col-count">{totalCount}</td>
+                  <td className="col-percent">100.0%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 /**
- * 직경 배열 → bin 데이터 (count + trend). **log binning**.
+ * 직경 배열 → bin 데이터 (dense P5~P95 + outlier 양쪽 끝). **log binning**.
  *
- * 커피 분쇄 입자 분포는 log-normal 표준 — log space 에서 균등 binning 이
- * 자연스러운 bell 모양 시각화를 만든다.
+ * 결과 array 구조:
+ *   [0]            fines outlier (lowerBound 미만, count > 0 일 때만)
+ *   [1..bins]      dense bins (lowerBound~upperBound, log-uniform)
+ *   [last]         coarse outlier (upperBound 초과, count > 0 일 때만)
  *
- * Range upper bound 는 P95. P95 초과는 어떤 bin 에도 속하지 않음.
+ * outlier bar 의 X 위치는 인접 dense bin 보다 한 step 바깥 (log-space).
+ * 실제 입자 range 는 actualMin/actualMax 에 별도 보존 → table 에 정확 범위 표시.
  *
- * **trend** = count 의 moving average (window 5, 좌우 ±2). bin 노이즈 smooth
- * 후 분포 전반적인 형태만 강조 — 추세선 시각화 전용.
- *
- * sweep Issue 22 guard: min === max → 단일 bar fallback.
+ * Issue 22: min === max → 단일 bar fallback.
  */
 function buildBins(diameters: number[], bins: number): HistogramBin[] {
   if (diameters.length === 0) return [];
   const sorted = [...diameters].sort((a, b) => a - b);
   const total = sorted.length;
-  // P5~P95 범위 binning. 양쪽 outlier 5% 제외 → dense 영역만 cover.
+  // P5 가 200µm 미만이면 200 부터 main bin 시작 — sub-200 노이즈는 fines outlier.
   const p5Index = Math.floor(total * 0.05);
   const p95Index = Math.floor(total * 0.95);
-  const lowerBound = sorted[Math.min(p5Index, total - 1)];
+  const lowerBound = Math.max(
+    sorted[Math.min(p5Index, total - 1)],
+    MIN_DISPLAY_DIAMETER_UM,
+  );
   const upperBound = sorted[Math.min(p95Index, total - 1)];
 
   const logMin = Math.log10(lowerBound);
@@ -399,11 +370,32 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
   const logBinWidth = (logMax - logMin) / bins;
 
   if (logBinWidth <= 0) {
-    return [{ range: Math.round(lowerBound), count: 100, trend: 100 }];
+    return [
+      {
+        range: Math.round(lowerBound),
+        rangeMax: Math.round(lowerBound),
+        count: total,
+        percentage: 100,
+      },
+    ];
   }
 
-  const counts: number[] = [];
-  const ranges: number[] = [];
+  const result: HistogramBin[] = [];
+
+  const finesCount = sorted.filter((d) => d < lowerBound).length;
+  if (finesCount > 0) {
+    const finesPos = Math.pow(10, logMin - logBinWidth);
+    result.push({
+      range: Math.round(finesPos),
+      rangeMax: Math.round(lowerBound),
+      count: finesCount,
+      percentage: (finesCount / total) * 100,
+      outlier: "fines",
+      actualMin: Math.round(sorted[0]),
+      actualMax: Math.round(lowerBound),
+    });
+  }
+
   for (let i = 0; i < bins; i++) {
     const lo = Math.pow(10, logMin + i * logBinWidth);
     const hi = Math.pow(10, logMin + (i + 1) * logBinWidth);
@@ -411,29 +403,27 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     const count = diameters.filter((d) =>
       isLast ? d >= lo && d <= hi : d >= lo && d < hi,
     ).length;
-    counts.push(count);
-    ranges.push(Math.round(lo));
+    result.push({
+      range: Math.round(lo),
+      rangeMax: Math.round(hi),
+      count,
+      percentage: (count / total) * 100,
+    });
   }
 
-  // Percentage (tooltip 표시용).
-  const percentages = counts.map((c) => (c / total) * 100);
-
-  // **CDF (Cumulative Distribution Function)**: line 우측 Y축.
-  // bin i 의 CDF = "bin i 의 우측 가장자리 이하 입자의 누적 %".
-  // outlier (P5 미만) 도 포함하므로 CDF 시작 ~5%, 끝 ~95% (P95 이상 outlier 제외).
-  // bar 의 density 와 complementary — 누적 정보 제공.
-  const firstBinLo = Math.pow(10, logMin);
-  let cumCount = sorted.filter((d) => d < firstBinLo).length;
-  const cdf: number[] = [];
-  for (let i = 0; i < bins; i++) {
-    cumCount += counts[i];
-    cdf.push((cumCount / total) * 100);
+  const coarseCount = sorted.filter((d) => d > upperBound).length;
+  if (coarseCount > 0) {
+    const coarsePosMax = Math.pow(10, logMax + logBinWidth);
+    result.push({
+      range: Math.round(upperBound),
+      rangeMax: Math.round(coarsePosMax),
+      count: coarseCount,
+      percentage: (coarseCount / total) * 100,
+      outlier: "coarse",
+      actualMin: Math.round(upperBound),
+      actualMax: Math.round(sorted[sorted.length - 1]),
+    });
   }
 
-  return counts.map((cnt, i) => ({
-    range: ranges[i],
-    count: cnt, // raw count (bar 좌측 Y축)
-    percentage: percentages[i], // % (tooltip)
-    trend: cdf[i], // CDF % (line 우측 Y축, 0-100% 단조 증가)
-  }));
+  return result;
 }

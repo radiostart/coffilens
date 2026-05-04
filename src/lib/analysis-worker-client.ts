@@ -49,11 +49,10 @@ export function runAnalysisInWorker(
       }
     };
     worker.onerror = (e) => {
-      console.error("[worker] uncaught error", e);
+      console.error("[worker] uncaught error", e.message ?? e);
       reject({
         kind: "memory_oom",
         phase: "pipeline",
-        message: e.message ?? "worker uncaught error",
       } satisfies AnalysisError);
       worker.terminate();
     };

@@ -10,6 +10,7 @@ import {
 import type { PipelineStep } from "../opencv/pipeline";
 import type { AnalysisError } from "../opencv/errors";
 import { useMeasurementStore } from "../stores/measurement.store";
+import { combineStats } from "../opencv/statistics";
 import { getTelemetryClient } from "../telemetry/client";
 import "./analyzing.css";
 
@@ -107,7 +108,34 @@ export function AnalyzingRoute() {
 
         if (ac.signal.aborted) return;
 
-        setResult(result);
+        // Multi-shot averaging integration:
+        //  - appendMode=true  → 이전 shot 들과 합쳐 combined stats 로 표시.
+        //  - appendMode=false → 새 측정 사이클. 누적 비우고 단일 shot 으로 시작.
+        // PipelineResult 의 coin/confidence/durationMs 는 가장 최근 shot 의 값.
+        // store 를 effect dep 으로 두지 않고 getState() 로 직접 읽는다 — 자기
+        // mutate (pushShotStats/setAppendMode) 가 effect 재진입을 일으키지 않게.
+        const store = useMeasurementStore.getState();
+        if (store.appendMode) {
+          const combinedStats = combineStats([
+            ...store.accumulatedStats,
+            result.stats,
+          ]);
+          store.pushShotStats(result.stats);
+          setResult({
+            stats: combinedStats,
+            coin: result.coin,
+            confidence: result.confidence,
+            durationMs: result.durationMs,
+          });
+          // append mode 1회 분석 후 자동 false — user trust 보호 (의도치 않은
+          // 자동 누적 방지). 다음 누적은 명시적 confirm 필요.
+          store.setAppendMode(false);
+        } else {
+          // 새 측정 사이클 — 이전 누적 비우고 단일 shot 으로 시작.
+          store.resetAccumulated();
+          store.pushShotStats(result.stats);
+          setResult(result);
+        }
         tel.track({
           type: "measurement_success",
           durationMs: Math.round(result.durationMs),
