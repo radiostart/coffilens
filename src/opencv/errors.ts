@@ -30,7 +30,8 @@ export type CandidateRejectReason =
   | "too_dark"        // mean 낮음 + 약한 gradient — 그림자
   | "too_bright"      // mean 높음 — 동전과 배경 contrast 약함
   | "weak_rim"        // gradient 약함 — 윤곽 흐림
-  | "low_contrast";   // |int-ext| 큼 — 주변과 contrast 부족
+  | "low_contrast"    // |int-ext| 큼 — 주변과 contrast 부족
+  | "hint_too_far";   // hint 위치와 후보 중심 거리 > r * factor — 사용자가 가리킨 동전과 다른 객체
 
 export interface CandidateInfo {
   position: CandidatePosition;
@@ -109,6 +110,7 @@ const REJECT_REASON_DETAIL: Record<CandidateRejectReason, string> = {
   too_bright: "동전과 배경이 비슷해요",
   weak_rim: "윤곽이 흐릿해요",
   low_contrast: "주변과 대비 부족",
+  hint_too_far: "지정한 위치와 떨어져 있어요",
 };
 
 const REJECT_REASON_PATTERN_HINT: Record<CandidateRejectReason, string> = {
@@ -117,6 +119,7 @@ const REJECT_REASON_PATTERN_HINT: Record<CandidateRejectReason, string> = {
   too_bright: "동전과 배경 색상이 비슷해요",
   weak_rim: "동전 윤곽이 흐려요 (흔들림 / 초점)",
   low_contrast: "동전 주변 대비가 부족해요",
+  hint_too_far: "표시한 동전 위치를 다시 확인해 주세요",
 };
 
 export function rejectReasonLabel(r: CandidateRejectReason): string {

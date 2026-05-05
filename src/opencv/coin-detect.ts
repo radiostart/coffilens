@@ -179,6 +179,18 @@ const COIN_MIN_RIM_GRADIENT = 18;
 // "exterior 측정 불가" sentinel. 이 값이면 |int-ext| 검증을 통과시킨다.
 const EXTERIOR_SENTINEL_NONE = 999;
 
+// hint 와 후보 중심 거리 허용 한도 — `dist > selected.r * MAX_HINT_DIST_FACTOR`
+// 이면 사용자가 가리킨 동전과 후보가 같은 원이라고 보기 어려워 거절.
+//
+// 배경 (2026-05-06, fixture 014): HoughCircles 가 진짜 동전을 못 찾고 phantom
+// 1개만 잡힌 케이스에서, hint(738,930) 와 phantom(384,665) 거리 443px 였음에도
+// "가장 가까운" 이라는 이유만으로 phantom 이 선택되어 silent false positive
+// 발생. r=131 의 3.4 배 거리인데 sanity check 가 없었음.
+//
+// 1.5 = hint 가 후보 원 밖으로 반지름의 50% 까지 벗어나도 허용 — 사용자 탭
+// 부정확성(rim 근처 탭) 흡수. 이보다 멀면 다른 객체로 간주해 no_coin throw.
+const MAX_HINT_DIST_FACTOR = 1.5;
+
 /**
  * 동적 감마 — 어두운 사진에서 HoughCircles 검출률 향상.
  *
@@ -541,6 +553,12 @@ export async function detectCoin(
     console.log(
       `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}] OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
     );
+    console.log(
+      "[coin-detect] reasons:",
+      annotated
+        .map((c) => `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) → ${c.reason ?? "PASS"}`)
+        .join(" | "),
+    );
 
     if (coinCandidates.length === 0) {
       // **Edge-arc probe (2026-05-05)**: HoughCircles 가 후보를 찾았지만 모두
@@ -583,11 +601,24 @@ export async function detectCoin(
         selectedCandidate.cx - hintX,
         selectedCandidate.cy - hintY,
       );
+      const maxDist = selectedCandidate.r * MAX_HINT_DIST_FACTOR;
       console.log(
         `[coin-detect] hint at (${hintX.toFixed(0)},${hintY.toFixed(0)}). ` +
-          `nearest candidate: r=${selectedCandidate.r.toFixed(1)} @(${selectedCandidate.cx.toFixed(0)},${selectedCandidate.cy.toFixed(0)}) dist=${dist.toFixed(0)}px. ` +
-          `multi_coin 검사 우회.`,
+          `nearest candidate: r=${selectedCandidate.r.toFixed(1)} @(${selectedCandidate.cx.toFixed(0)},${selectedCandidate.cy.toFixed(0)}) dist=${dist.toFixed(0)}px (max ${maxDist.toFixed(0)}px).`,
       );
+      if (dist > maxDist) {
+        // hint 와 어떤 후보도 매칭되지 않음 — phantom 이 가장 가까워도 사용자가
+        // 가리킨 동전이 아닐 가능성이 높음. silent false positive 방지를 위해
+        // no_coin 으로 명시 실패 (사용자가 다시 찍거나 hint 재지정).
+        console.warn(
+          `[coin-detect] hint mismatch: 가장 가까운 후보가 hint 에서 ${dist.toFixed(0)}px 떨어짐 (한도 ${maxDist.toFixed(0)}px). 사용자가 가리킨 동전과 다른 객체로 판단 → no_coin.`,
+        );
+        const candidates: CandidateInfo[] = annotated.map((c) => ({
+          position: derivePosition(c.cx, c.cy, gray.cols, gray.rows),
+          rejectReason: c.reason ?? "hint_too_far",
+        }));
+        throw { kind: "no_coin", candidates } satisfies AnalysisError;
+      }
     } else {
       if (coinCandidates.length > 1) {
         // hint 없음 — 자동 검출 분기 (가장 큰 것 + concentric/separated 검사)

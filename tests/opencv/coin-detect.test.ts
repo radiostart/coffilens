@@ -215,6 +215,25 @@ describe("detectCoin — 분기 동작", () => {
     expect(result.mmPerPixel).toBeGreaterThan(0.05);
     expect(result.mmPerPixel).toBeLessThan(0.3);
   });
+
+  it("hint 와 후보 거리 > r * 1.5 → no_coin (hint_too_far)", async () => {
+    // 014 회귀: HoughCircles 가 phantom 만 잡고 진짜 동전 누락. 사용자 hint 는
+    // 진짜 동전 위치(0.9, 0.7) 인데 phantom 이 (200, 200) r=80 → dist=843px,
+    // 한도 80*1.5=120px 초과 → "가장 가까운 후보" 라도 거절되어야 함.
+    setupCvMock({ circles: [200, 200, 80], imgRows: 1280, imgCols: 720 });
+    await expect(
+      detectCoin(fakeCanvas(), "500", { x: 0.9, y: 0.7 }),
+    ).rejects.toMatchObject({ kind: "no_coin" });
+  });
+
+  it("hint 가 후보 안쪽 (dist < r) → 정상 선택", async () => {
+    // 후보 r=80 @ (360, 640). hint 가 (0.5, 0.5) → 픽셀 (360, 640) — 정확히 중심.
+    // dist=0 < 120 (=80*1.5) → 통과.
+    setupCvMock({ circles: [360, 640, 80], imgRows: 1280, imgCols: 720 });
+    const result = await detectCoin(fakeCanvas(), "500", { x: 0.5, y: 0.5 });
+    expect(result.centerX).toBe(360);
+    expect(result.radiusPx).toBe(80);
+  });
 });
 
 describe("computeCoinConfidence — 휴리스틱 점수", () => {
