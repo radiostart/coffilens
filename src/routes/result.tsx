@@ -9,6 +9,7 @@ import {
 import { DisclaimerBanner } from "../components/disclaimer-banner";
 import { AdBanner } from "../components/ad-banner";
 import { ConfirmModal } from "../components/confirm-modal";
+import { DebugOverlay } from "../components/debug-overlay";
 import { useMeasurementStore } from "../stores/measurement.store";
 import { useHistoryStore } from "../stores/history.store";
 import { errorDetails, rejectReasonLabel } from "../opencv/errors";
@@ -60,6 +61,8 @@ export function ResultRoute() {
   const [showRetakeConfirm, setShowRetakeConfirm] = useState(false);
   // no_coin 진단 — v3 default 노출, "자세히" 클릭 시 v2 (per-candidate) expand.
   const [showDiagDetail, setShowDiagDetail] = useState(false);
+  // 개발자용 검출 오버레이 표시 여부 — 기본 OFF (필요할 때 토글로 켬).
+  const [showDebugOverlay, setShowDebugOverlay] = useState(false);
   const isArchived = archive !== null;
   // archive view 의 shotCount: record 의 shotCount (구 record 는 null = 1).
   // 신규 측정: accumulatedStats.length.
@@ -268,6 +271,17 @@ export function ResultRoute() {
   // single shot D50 ±50µm, 3 shot ≈ ±29µm, 5 shot ≈ ±22µm.
   const band = computeConfidenceBand(shotCount);
 
+  // **개발자용 디버그 오버레이 토글** — `import.meta.env.DEV` 시에만 노출.
+  // 로컬 dev 빌드 (vite dev) 에서만 토글 버튼이 보이고, production 빌드는 dead code.
+  // archive view 는 frame/particles 가 store 에 없어 표시 불가 (live 측정 직후만).
+  const debugAvailable =
+    import.meta.env.DEV &&
+    !isArchived &&
+    frame !== null &&
+    Array.isArray(result.particles) &&
+    result.imageWidth > 0 &&
+    result.imageHeight > 0;
+
   return (
     <>
       <NavBar title="분석 결과" />
@@ -287,6 +301,27 @@ export function ResultRoute() {
             </span>
           )}
         </header>
+
+        {debugAvailable && (
+          <button
+            type="button"
+            className="result-debug-toggle"
+            onClick={() => setShowDebugOverlay((v) => !v)}
+            aria-pressed={showDebugOverlay}
+          >
+            🔬 {showDebugOverlay ? "검출 숨기기" : "검출 보기"}
+          </button>
+        )}
+
+        {debugAvailable && showDebugOverlay && frame !== null && (
+          <DebugOverlay
+            frame={frame}
+            coin={result.coin}
+            particles={result.particles}
+            imageWidth={result.imageWidth}
+            imageHeight={result.imageHeight}
+          />
+        )}
 
         {/* 1.5차 신뢰도 바 */}
         <ConfidenceBar

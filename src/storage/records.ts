@@ -151,6 +151,11 @@ export function recordToPipelineResult(
       warning: false,
     },
     durationMs: r.durationMs ?? 0,
+    // archive view 는 frame/markers 미저장 → 0 + 빈 배열 (DebugOverlay 는 archive
+    // 인 경우 표시되지 않음, result.tsx 의 canShowDebug 에서 isArchived 차단).
+    imageWidth: 0,
+    imageHeight: 0,
+    particles: [],
   };
 }
 

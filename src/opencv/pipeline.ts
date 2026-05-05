@@ -23,8 +23,8 @@ import {
   segmentParticles,
   disposeSegmentation,
 } from "./particle-segment";
-import { computeStats } from "./statistics";
-import type { ParticleStats } from "./statistics";
+import { computeStats, extractParticleMarkers } from "./statistics";
+import type { ParticleStats, ParticleMarker } from "./statistics";
 import { applyImageToSieveCalibration } from "./calibration";
 import { computeConfidence } from "./confidence";
 import type { ConfidenceResult } from "./confidence";
@@ -35,6 +35,15 @@ export interface PipelineResult {
   coin: CoinDetection;
   confidence: ConfidenceResult;
   durationMs: number;
+  /**
+   * 분석에 사용된 (downsampled) canvas 의 크기 — 디버그 오버레이가 표시 사이즈에
+   * 맞게 marker 좌표를 scale 할 때 필요. coin.centerX/Y/radiusPx 와 markers 의
+   * cx/cy/rPx 는 모두 이 좌표계 기준.
+   */
+  imageWidth: number;
+  imageHeight: number;
+  /** 개발자 디버그 오버레이용 입자 마커 — 각 contour 의 centroid + 등가 반지름. */
+  particles: ParticleMarker[];
 }
 
 export type PipelineStep =
@@ -130,6 +139,18 @@ export async function runPipeline(
       throw { kind: "no_particles" } satisfies AnalysisError;
     }
 
+    // 3) 디버그 마커 — debug overlay 전용. 실패해도 본 측정 결과 영향 없음.
+    //    별도 try 로 분리해 moments 등 옵션 cv 함수 부재 시 no_particles 오인 방지.
+    let particles: ParticleMarker[] = [];
+    try {
+      particles = extractParticleMarkers(
+        segmentation.contours,
+        coin.mmPerPixel,
+      );
+    } catch (e) {
+      console.warn("[pipeline] extractParticleMarkers failed (non-fatal)", e);
+    }
+
     signal.throwIfAborted();
     callbacks.onProgress?.("confidence", 95);
     await tick();
@@ -146,7 +167,15 @@ export async function runPipeline(
       typeof performance !== "undefined" && performance.now
         ? performance.now()
         : Date.now();
-    return { stats, coin, confidence, durationMs: now - start };
+    return {
+      stats,
+      coin,
+      confidence,
+      durationMs: now - start,
+      imageWidth: canvas.width,
+      imageHeight: canvas.height,
+      particles,
+    };
   } finally {
     disposeSegmentation(segmentation);
   }

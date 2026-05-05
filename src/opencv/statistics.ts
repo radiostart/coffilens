@@ -20,6 +20,10 @@ declare const cv: {
   contourArea: (contour: CvMat) => number;
   arcLength: (contour: CvMat, closed: boolean) => number;
   convexHull: (points: CvMat, hull: CvMat) => void;
+  moments: (
+    array: CvMat,
+    binaryImage?: boolean,
+  ) => { m00: number; m10: number; m01: number };
   Mat: new () => CvMat;
 };
 
@@ -620,6 +624,119 @@ export interface ConfidenceBand {
   d10Pm: number;
   d50Pm: number;
   d90Pm: number;
+}
+
+/**
+ * **개발자용 디버그 오버레이 마커** — 검출된 입자를 원본 이미지 위에 그리기.
+ *
+ * pixel 좌표계는 분석 시 사용된 canvas (downsampled, ≤1280px). result 화면이
+ * 표시 사이즈에 맞게 scale 한다. mm/sieve calibration 무관 — pure pixel 정보.
+ *
+ * `kind`:
+ *  - fines    : < 300µm image-space (FINES_THRESHOLD_UM)
+ *  - main     : 300µm ~ 1500µm 정상 입자
+ *  - boulder  : ≥ 1500µm 단일 큰 입자 (D-value 통계 포함)
+ *  - clump    : ≥ 1500µm 응집체 (D-value 통계 제외)
+ */
+export interface ParticleMarker {
+  cx: number;
+  cy: number;
+  rPx: number;
+  kind: "fines" | "main" | "boulder" | "clump";
+}
+
+/**
+ * 동일 contour 집합에 대해 computeStats 와 동일 분류 로직으로 마커 추출.
+ *
+ * 분류 기준은 statistics.ts 내부 상수 (FINES_THRESHOLD_UM / CLUMP_MIN_DIAMETER_UM /
+ * BOULDER_MIN_CIRCULARITY / BOULDER_MIN_SOLIDITY) 와 정합. computeStats 와 별도
+ * pass — contours 는 caller-managed 로 두 pass 모두 동일 vector 에서 read.
+ */
+export function extractParticleMarkers(
+  contours: CvMatVector,
+  mmPerPixel: number,
+): ParticleMarker[] {
+  const minDiameterUm = computeMinDiameter(mmPerPixel);
+  const markers: ParticleMarker[] = [];
+  // eslint-disable-next-line local/no-direct-mat -- short-lived scratch, dispose in finally
+  const hullScratch = new cv.Mat();
+
+  const numContours = contours.size();
+  for (let i = 0; i < numContours; i++) {
+    const c = contours.get(i);
+    const areaPx = cv.contourArea(c);
+    const areaMm2 = areaPx * mmPerPixel ** 2;
+    const diameterMm = 2 * Math.sqrt(areaMm2 / Math.PI);
+    const diameterUm = diameterMm * 1000;
+
+    let centroid: { cx: number; cy: number } | null = null;
+    let circularity: number | undefined;
+    let solidity: number | undefined;
+
+    try {
+      const m = cv.moments(c);
+      if (m.m00 > 0) {
+        centroid = { cx: m.m10 / m.m00, cy: m.m01 / m.m00 };
+      }
+    } catch {
+      /* moments 실패 → centroid null, marker skip */
+    }
+
+    if (
+      diameterUm >= CLUMP_MIN_DIAMETER_UM &&
+      diameterUm <= MAX_PARTICLE_DIAMETER_UM
+    ) {
+      try {
+        const perimeterPx = cv.arcLength(c, true);
+        if (perimeterPx > 0) {
+          circularity = (4 * Math.PI * areaPx) / (perimeterPx * perimeterPx);
+        }
+        cv.convexHull(c, hullScratch);
+        const hullAreaPx = cv.contourArea(hullScratch);
+        if (hullAreaPx > 0) {
+          solidity = areaPx / hullAreaPx;
+        }
+      } catch {
+        /* shape unknown → clump */
+      }
+    }
+
+    try {
+      c.delete();
+    } catch {
+      /* ignore */
+    }
+
+    if (!centroid) continue;
+    if (diameterUm < minDiameterUm) continue;
+    if (diameterUm > MAX_PARTICLE_DIAMETER_UM) continue;
+
+    const rPx = Math.sqrt(areaPx / Math.PI);
+
+    let kind: ParticleMarker["kind"];
+    if (diameterUm > CLUMP_MIN_DIAMETER_UM) {
+      const isBoulder =
+        circularity !== undefined &&
+        solidity !== undefined &&
+        circularity >= BOULDER_MIN_CIRCULARITY &&
+        solidity >= BOULDER_MIN_SOLIDITY;
+      kind = isBoulder ? "boulder" : "clump";
+    } else if (diameterUm < FINES_THRESHOLD_UM) {
+      kind = "fines";
+    } else {
+      kind = "main";
+    }
+
+    markers.push({ cx: centroid.cx, cy: centroid.cy, rPx, kind });
+  }
+
+  try {
+    hullScratch.delete();
+  } catch {
+    /* ignore */
+  }
+
+  return markers;
 }
 
 /**

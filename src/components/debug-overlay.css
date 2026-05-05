@@ -1,0 +1,70 @@
+.debug-overlay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  margin: var(--space-md) 0;
+  border: 2px dashed rgba(120, 120, 120, 0.5);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.debug-overlay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.debug-overlay-header h2 {
+  margin: 0;
+}
+
+.debug-overlay-canvas-wrap {
+  width: 100%;
+  background: #000;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.debug-overlay-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.debug-overlay-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-xs) var(--space-md);
+}
+
+.debug-overlay-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.debug-overlay-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.debug-overlay-toggle input {
+  margin: 0;
+}
+
+.debug-overlay-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}

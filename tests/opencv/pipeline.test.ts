@@ -46,6 +46,7 @@ vi.mock("../../src/opencv/statistics", () => ({
     totalAreaMm2: 50,
     diameters: Array(100).fill(720),
   })),
+  extractParticleMarkers: vi.fn(() => []),
   percentile: vi.fn(),
 }));
 

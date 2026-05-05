@@ -36,6 +36,7 @@
 .result-data-inline {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: var(--space-md);
   flex-wrap: wrap;
   margin: 0;
@@ -43,6 +44,18 @@
   background: var(--color-bg-surface);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
+}
+
+/* 모바일 (375px 근방) — 5 column 한 줄에 fit 하도록 gap ↓ + separator 숨김. */
+@media (max-width: 420px) {
+  .result-data-inline {
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-sm);
+  }
+
+  .result-data-sep {
+    display: none;
+  }
 }
 
 .result-data-inline > div {
@@ -260,6 +273,22 @@
   text-underline-offset: 3px;
   padding: var(--space-sm);
   align-self: center;
+}
+
+/* 개발자용 검출 오버레이 토글 — dev 빌드에서만 노출. */
+.result-debug-toggle {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px dashed rgba(120, 120, 120, 0.5);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.result-debug-toggle:hover {
+  border-color: var(--color-text-secondary);
 }
 
 /* archive view 의 삭제 확인 단계 — 빨간색 강조 */

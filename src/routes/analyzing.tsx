@@ -126,6 +126,11 @@ export function AnalyzingRoute() {
             coin: result.coin,
             confidence: result.confidence,
             durationMs: result.durationMs,
+            // 디버그 오버레이는 latest shot 의 frame 기준이므로 이번 shot 의
+            // image dims + particles 그대로 사용.
+            imageWidth: result.imageWidth,
+            imageHeight: result.imageHeight,
+            particles: result.particles,
           });
           // append mode 1회 분석 후 자동 false — user trust 보호 (의도치 않은
           // 자동 누적 방지). 다음 누적은 명시적 confirm 필요.
