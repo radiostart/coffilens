@@ -1,0 +1,83 @@
+{
+  "$schema": "synthetic grind fixtures — boulder/clump shape classifier 검증",
+  "createdAt": "2026-05-05",
+  "description": "합성 fixture (Phase 1) — shape factor 분류 동작 확인용. SVG 로 생성한 입자 형상이라 실제 photo 의 lighting/paper texture 검증 불가. 실 사진 fixture 추가 시 더 정확한 calibration 가능.",
+  "generator": "scripts/build-grind-fixtures.ts",
+  "regenerate": "npx tsx scripts/build-grind-fixtures.ts",
+  "imageSpec": {
+    "size": "1280×960",
+    "coin": "500원, r=110px @ 우상단 (mmPerPx ≈ 0.12)",
+    "background": "#f8f8f6 (paper)",
+    "particle": "#3a2614 (dark brown)"
+  },
+  "fixtures": {
+    "coarse-boulder.synth.jpg": {
+      "kind": "synthetic-boulder-rich",
+      "description": "정상 입자 + 큰 단일 원형 입자 (boulder) 다수 — boulder classifier 검증",
+      "expected": {
+        "boulderCount": ">=10",
+        "boulderAreaPct": ">=50",
+        "clumpCount": "<=2"
+      },
+      "actualMeasured_2026-05-05": {
+        "boulderCount": 19,
+        "boulderAreaPct": 83.6,
+        "clumpCount": 0
+      }
+    },
+    "medium-clump.synth.jpg": {
+      "kind": "synthetic-clump-rich",
+      "description": "정상 입자 + 응집체 (sub-circle 겹침) 8개 — clump classifier 검증",
+      "expected": {
+        "clumpCount": ">=4",
+        "clumpAreaPct": ">=15",
+        "boulderCount": "<=3"
+      },
+      "actualMeasured_2026-05-05": {
+        "clumpCount": 5,
+        "clumpAreaPct": 30.6,
+        "boulderCount": 2,
+        "boulderAreaPct": 12.4
+      }
+    },
+    "french-press-mock.synth.jpg": {
+      "kind": "synthetic-coarse-drip",
+      "description": "거친 분쇄 emulation — boulder + normal mix",
+      "expected": {
+        "boulderCount": ">=5",
+        "boulderAreaPct": ">=30"
+      },
+      "actualMeasured_2026-05-05": {
+        "boulderCount": 11,
+        "boulderAreaPct": 57.9,
+        "clumpCount": 1,
+        "clumpAreaPct": 8.6
+      }
+    }
+  },
+  "qualityGate_phase1": {
+    "description": "Shape classifier 분류 정확성 — synthetic ground truth 기반",
+    "criteria": [
+      "coarse-boulder: boulderAreaPct >= 50 (boulder 인식)",
+      "medium-clump:   clumpAreaPct >= 15 (clump 인식 — synthetic 한계)",
+      "boulder fixture 의 boulder/clump area ratio > 5",
+      "primary validation: real fixtures (test-vs3-*, test-500-fine)"
+    ],
+    "validatedAt": "2026-05-05",
+    "calibrationSource": "real fixtures — synthetic 은 unit test 용이며 한계 있음 (합성 clump 가 실 photo 보다 boundary 가 round 함)"
+  },
+  "TODO_realPhotos": {
+    "description": "**실 사진 fixture 필요** — 합성으론 lighting/paper texture/over-segmentation 검증 안 됨.",
+    "needed": [
+      "fixtures/real-coarse-drip/*.jpeg — 실제 거친 드립용 분쇄 (D50 ~900µm)",
+      "fixtures/real-french-press/*.jpeg — 프렌치프레스 (D50 ~1100µm, boulder 풍부)",
+      "fixtures/real-clumped-grind/*.jpeg — 정전기 응집된 fine grind"
+    ],
+    "thresholdTuningPlan": [
+      "1. Real photo 측정 → shape factor 분포 (DEBUG_STATS=1) 확인",
+      "2. 사용자 ground-truth 라벨 (실제 boulder vs clump 시각 판단)",
+      "3. 임계값 calibration: BOULDER_MIN_CIRCULARITY / SOLIDITY 튜닝",
+      "4. Phase 2: boulder 를 D-value 통계에 포함 검토"
+    ]
+  }
+}

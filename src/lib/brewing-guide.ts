@@ -168,14 +168,17 @@ export function buildBrewingGuide(input: {
     );
   }
 
-  // clump caveat (2026-05-02 조정): 임계값 동일.
+  // clump caveat — Phase 1/2 (2026-05-05) 후 부드럽게 조정.
+  // 큰 contour 가 boulder (단일 큰 입자) vs clump (응집/over-segmentation) 로
+  // 별도 분리됨. clump area 큰 경우 대부분 인접 입자 merge artifact 라서
+  // "burr 점검" 같은 단정 표현 X — 촬영 / 분쇄물 펴기 안내 위주.
   if (input.clumpAreaRatio >= 40) {
     caveats.push(
-      `덩어리(클럼프) 가 면적 ${input.clumpAreaRatio.toFixed(0)}% — 분쇄 안 된 큰 입자가 많아요. 추출 후 퍽 사진이거나 그라인더 burr 점검 필요.`,
+      `클럼프 ${input.clumpAreaRatio.toFixed(0)}% — 일부 입자가 뭉쳐 있어요. 분쇄 후 가볍게 흔들어 평탄하게 펴고 다시 측정하면 더 정확해져요.`,
     );
   } else if (input.clumpAreaRatio >= 20) {
     caveats.push(
-      `덩어리 ${input.clumpAreaRatio.toFixed(0)}% — 일부 입자가 뭉쳐 있어요. 분쇄 후 가볍게 흔들어 평탄하게 펴고 다시 측정하면 더 정확해져요.`,
+      `클럼프 ${input.clumpAreaRatio.toFixed(0)}% — 일부 입자가 뭉쳐 있어요. 분쇄물을 얇게 펴 다시 촬영하면 정확도가 올라가요.`,
     );
   }
   if (uniClass === "very_uneven") {

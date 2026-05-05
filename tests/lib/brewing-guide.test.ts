@@ -150,26 +150,28 @@ describe("buildBrewingGuide — low confidence caveat", () => {
 });
 
 describe("buildBrewingGuide — clump caveat 임계", () => {
-  it("clumpAreaRatio 24% (VS3 정상 범위) → 약한 안내", () => {
+  it("clumpAreaRatio 24% (VS3 정상 범위) → 약한 안내 (중간 임계)", () => {
     const guide = buildBrewingGuide({
       d50: 700,
       uniformity: 4.0,
       clumpAreaRatio: 24,
       mmPerPixel: 0.045,
     });
-    expect(guide.caveat).toContain("덩어리 24%");
-    // 강한 경고 (40%+) 텍스트는 포함 X
+    expect(guide.caveat).toContain("클럼프 24%");
+    // 2026-05-05: "burr 점검" 단정 표현 제거 — Phase 1+2 boulder/clump 분리 후
+    // 42% clump 도 over-segmentation artifact 가능성 큼.
     expect(guide.caveat).not.toContain("burr 점검");
   });
 
-  it("clumpAreaRatio 54% (puck 케이스) → 강한 경고", () => {
+  it("clumpAreaRatio 54% (puck 케이스) → 더 강한 안내 (40%+ 임계)", () => {
     const guide = buildBrewingGuide({
       d50: 600,
       uniformity: 5.5,
       clumpAreaRatio: 54,
       mmPerPixel: 0.045,
     });
-    expect(guide.caveat).toContain("burr 점검");
+    expect(guide.caveat).toContain("클럼프 54%");
+    expect(guide.caveat).toContain("평탄하게");
   });
 
   it("clumpAreaRatio 18% → caveat 없음 (false alarm 방지)", () => {

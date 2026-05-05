@@ -1,0 +1,95 @@
+{
+  "$schema": "fixtures multi-shot regression manifest",
+  "createdAt": "2026-05-05",
+  "description": "동일 분쇄도 14장 다각도 — 측정 일관성 회귀 + boulder/clump 분리 검증",
+  "coinType": "500",
+  "grindClass": "fine-medium",
+  "expectedDistribution": "log-normal, single-peak",
+  "regressionBaseline": {
+    "n": 10,
+    "successRate": 0.71,
+    "comment": "4장 (002, 007, 009, 011) 동전 가장자리 잘림 → no_coin 실패. probe tuning Phase 2.",
+    "d50_volume_mean": 643,
+    "d50_volume_cov": 0.04,
+    "uniformity_ratio_mean": 2.6
+  },
+  "shots": {
+    "KakaoTalk_Photo_2026-05-05-14-10-33 001.jpeg": {
+      "category": "nominal",
+      "expectedClumps": 0,
+      "expectedBoulders": 0
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-33 002.jpeg": {
+      "category": "fail-coin-clipped",
+      "comment": "동전 가장자리 잘림 — partial_coin probe miss"
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-34 003.jpeg": {
+      "category": "nominal",
+      "expectedClumps": 0,
+      "expectedBoulders": 0
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-34 004.jpeg": {
+      "category": "nominal",
+      "expectedClumps": 0,
+      "expectedBoulders": 0
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-34 005.jpeg": {
+      "category": "outlier-far-shot",
+      "comment": "mmPerPx 0.185 — fines underestimate"
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-34 006.jpeg": {
+      "category": "nominal",
+      "expectedClumps": 0,
+      "expectedBoulders": 0
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-35 007.jpeg": {
+      "category": "fail-coin-clipped",
+      "comment": "동전 상단 잘림"
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-35 008.jpeg": {
+      "category": "nominal",
+      "expectedClumps": 0,
+      "expectedBoulders": 0
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-35 009.jpeg": {
+      "category": "fail-coin-clipped",
+      "comment": "동전 우상단 잘림"
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-35 010.jpeg": {
+      "category": "nominal",
+      "expectedClumps": 0,
+      "expectedBoulders": 0
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-35 011.jpeg": {
+      "category": "fail-coin-clipped",
+      "comment": "동전 우하단 잘림"
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-35 012.jpeg": {
+      "category": "nominal",
+      "expectedClumps": 0,
+      "expectedBoulders": 0
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-35 013.jpeg": {
+      "category": "nominal",
+      "expectedClumps": 0,
+      "expectedBoulders": 0
+    },
+    "KakaoTalk_Photo_2026-05-05-14-10-35 014.jpeg": {
+      "category": "outlier-clumped",
+      "comment": "분쇄물 응집 상태 — Phase 1 검증 핵심 fixture. shape factor 가 clump 잡아내야 함.",
+      "expectedClumps": ">5",
+      "expectedClumpAreaPct": ">3"
+    }
+  },
+  "qualityGates": {
+    "phase1": {
+      "description": "Boulder vs clump 분리 동작 확인",
+      "criteria": [
+        "nominal 사진들: clump+boulder count ≤ 2 (false positive 최소)",
+        "outlier-clumped (014): clumpCount ≥ 5 (분리 작동)",
+        "D50 mean nominal n=7: 355 ± 40µm (이전 baseline 유지)",
+        "D50 CoV nominal n=7: ≤ 8% (이전 baseline 유지)"
+      ]
+    }
+  }
+}

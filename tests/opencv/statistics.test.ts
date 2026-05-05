@@ -15,15 +15,83 @@ interface MockMatVector {
 /**
  * cv mock — areasPx 시퀀스로 contourArea 가 매번 다른 값 반환.
  * mmPerPixel 입력 결합으로 직경 계산 검증.
+ *
+ * shape factor mock — 모든 large 입자가 default 로 clump 형상.
+ * `setupCvMockWithShape` 가 boulder vs clump 분리 테스트용.
  */
 function setupCvMock(areasPx: number[]) {
-  let i = 0;
+  let particleIdx = 0;
+  let lastParticleArea = 0;
+  let nextIsHull = false;
   vi.stubGlobal("cv", {
     contourArea: vi.fn(() => {
-      const a = areasPx[i % Math.max(1, areasPx.length)];
-      i++;
-      return a ?? 0;
+      if (nextIsHull) {
+        nextIsHull = false;
+        // clump-like hull (sol = 0.5 → hull = area / 0.5)
+        return lastParticleArea / 0.5;
+      }
+      const a = areasPx[particleIdx % Math.max(1, areasPx.length)] ?? 0;
+      particleIdx++;
+      lastParticleArea = a;
+      return a;
     }),
+    arcLength: vi.fn(() =>
+      Math.sqrt((4 * Math.PI * lastParticleArea) / 0.2),
+    ),
+    convexHull: vi.fn(() => {
+      nextIsHull = true;
+    }),
+    Mat: function MockMat() {
+      return { delete: vi.fn() };
+    },
+  });
+  const contours: MockMatVector = {
+    size: () => areasPx.length,
+    get: () => ({ delete: vi.fn() }),
+  };
+  return contours;
+}
+
+/**
+ * Shape-aware mock — boulder/clump 분리 테스트용.
+ *
+ * 호출 순서 (per particle):
+ *   computeStats(c) → cv.contourArea(c) → [if large] cv.arcLength(c)
+ *                   → cv.convexHull(c, hull) → cv.contourArea(hull)
+ *
+ * shapes[i] : 입자 i 의 형상 — "boulder" (circ 0.85, sol 0.95)
+ *                            "clump"   (circ 0.30, sol 0.55)
+ */
+function setupCvMockWithShape(
+  areasPx: number[],
+  shapes: Array<"boulder" | "clump">,
+) {
+  let particleIdx = 0;
+  // hull area 가 다음 contourArea 호출 — flag 로 구분.
+  let nextIsHull = false;
+  vi.stubGlobal("cv", {
+    contourArea: vi.fn(() => {
+      if (nextIsHull) {
+        nextIsHull = false;
+        const a = areasPx[particleIdx - 1] ?? 0;
+        const sol = shapes[particleIdx - 1] === "boulder" ? 0.95 : 0.55;
+        return a / sol;
+      }
+      const a = areasPx[particleIdx] ?? 0;
+      particleIdx++;
+      return a;
+    }),
+    arcLength: vi.fn(() => {
+      const a = areasPx[particleIdx - 1] ?? 0;
+      const circ = shapes[particleIdx - 1] === "boulder" ? 0.85 : 0.3;
+      return Math.sqrt((4 * Math.PI * a) / circ);
+    }),
+    convexHull: vi.fn(() => {
+      nextIsHull = true;
+    }),
+    Mat: function MockMat() {
+      return { delete: vi.fn() };
+    },
   });
   const contours: MockMatVector = {
     size: () => areasPx.length,
@@ -181,5 +249,120 @@ describe("percentile", () => {
   it("0 → 첫번째, 1 → 마지막", () => {
     expect(percentile([10, 20, 30], 0)).toBe(10);
     expect(percentile([10, 20, 30], 1)).toBe(30);
+  });
+});
+
+describe("Boulder vs Clump 분리 (Phase 1, 2026-05-05)", () => {
+  // ≥ 1500µm 입자만 shape factor 분류 대상.
+  // mmPerPixel=0.05 → areaMm2 = areaPx × 0.0025
+  //   D_um = 2 × sqrt(areaMm2 / π) × 1000
+  //   D=2000µm → areaMm2 = π × 1² = π → areaPx = π / 0.0025 ≈ 1257
+  //   D=600µm  → areaMm2 = π × 0.3² = 0.283 → areaPx ≈ 113
+  const NORMAL_AREA = 113; // ~600µm
+  const LARGE_AREA = 1257; // ~2000µm
+
+  it("단일 boulder 형상 (high circ + sol) → boulder bucket + D-value 통계 포함 (Phase 2)", () => {
+    // 정상 입자 5개 + boulder 1개
+    const areasPx = [NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, LARGE_AREA];
+    const shapes: Array<"boulder" | "clump"> = [
+      "boulder", "boulder", "boulder", "boulder", "boulder", // 정상 입자 — shape unused
+      "boulder",
+    ];
+    const contours = setupCvMockWithShape(areasPx, shapes);
+    const stats = computeStats(contours, 0.05);
+    expect(stats.boulders.count).toBe(1);
+    expect(stats.clumps.count).toBe(0);
+    // **Phase 2**: boulder 가 D-value 통계에 포함됨 → particleCount = 6
+    expect(stats.particleCount).toBe(6);
+  });
+
+  it("응집체 형상 (low circ + sol) → clump bucket, D-value 제외", () => {
+    const areasPx = [NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, LARGE_AREA, LARGE_AREA];
+    const shapes: Array<"boulder" | "clump"> = [
+      "boulder", "boulder", "boulder", // 정상 입자
+      "clump", "clump",
+    ];
+    const contours = setupCvMockWithShape(areasPx, shapes);
+    const stats = computeStats(contours, 0.05);
+    expect(stats.boulders.count).toBe(0);
+    expect(stats.clumps.count).toBe(2);
+    // clump 는 통계 제외 → particleCount = 3 (정상 입자만)
+    expect(stats.particleCount).toBe(3);
+  });
+
+  it("boulder + clump 혼합 → boulder 만 통계 포함 (Phase 2)", () => {
+    const areasPx = [NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, LARGE_AREA, LARGE_AREA, LARGE_AREA];
+    const shapes: Array<"boulder" | "clump"> = [
+      "boulder", "boulder", "boulder",
+      "boulder", "clump", "boulder",
+    ];
+    const contours = setupCvMockWithShape(areasPx, shapes);
+    const stats = computeStats(contours, 0.05);
+    expect(stats.boulders.count).toBe(2);
+    expect(stats.clumps.count).toBe(1);
+    // **Phase 2**: 정상 3개 + boulder 2개 → particleCount = 5 (clump 만 제외)
+    expect(stats.particleCount).toBe(5);
+  });
+
+  it("areaRatio: boulder + clump area 합쳐 분모 일관성", () => {
+    const areasPx = [NORMAL_AREA, LARGE_AREA, LARGE_AREA];
+    const shapes: Array<"boulder" | "clump"> = [
+      "boulder", // normal particle
+      "boulder", // boulder
+      "clump", // clump
+    ];
+    const contours = setupCvMockWithShape(areasPx, shapes);
+    const stats = computeStats(contours, 0.05);
+    // total area = normal + boulder + clump
+    // boulder area / total ≈ LARGE / (NORMAL + 2×LARGE)
+    const expectedBoulderRatio = (LARGE_AREA / (NORMAL_AREA + 2 * LARGE_AREA)) * 100;
+    const expectedClumpRatio = expectedBoulderRatio; // 같은 area
+    expect(stats.boulders.areaRatio).toBeCloseTo(expectedBoulderRatio, 0);
+    expect(stats.clumps.areaRatio).toBeCloseTo(expectedClumpRatio, 0);
+    // 합 ≈ 95% (NORMAL 이 ~5% 차지)
+    expect(stats.boulders.areaRatio + stats.clumps.areaRatio).toBeGreaterThan(90);
+  });
+
+  it("**Phase 2**: boulder 추가 시 D90 정상화 — French Press 케이스", () => {
+    // 정상 입자 (small) + boulder (large) → boulder 가 D90 에 영향
+    const normalOnly = [NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, NORMAL_AREA];
+    const withBoulders = [
+      NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, NORMAL_AREA,
+      LARGE_AREA, LARGE_AREA,
+    ];
+    const c1 = setupCvMockWithShape(
+      normalOnly,
+      ["boulder", "boulder", "boulder", "boulder", "boulder"],
+    );
+    const s1 = computeStats(c1, 0.05);
+    const c2 = setupCvMockWithShape(
+      withBoulders,
+      ["boulder", "boulder", "boulder", "boulder", "boulder", "boulder", "boulder"],
+    );
+    const s2 = computeStats(c2, 0.05);
+    // boulder 가 D-value 통계 포함 → s2 의 D90 > s1 의 D90 (boulder 가 distribution top tail)
+    expect(s2.d90).toBeGreaterThan(s1.d90);
+    // boulder count 도 분리 보고
+    expect(s2.boulders.count).toBe(2);
+  });
+
+  it("**Phase 2**: clump 만 있는 경우 D-value 변화 없음", () => {
+    // 정상 입자만 vs 정상+clump
+    const normalOnly = [NORMAL_AREA, NORMAL_AREA, NORMAL_AREA];
+    const withClump = [NORMAL_AREA, NORMAL_AREA, NORMAL_AREA, LARGE_AREA];
+    const c1 = setupCvMockWithShape(
+      normalOnly,
+      ["boulder", "boulder", "boulder"],
+    );
+    const s1 = computeStats(c1, 0.05);
+    const c2 = setupCvMockWithShape(
+      withClump,
+      ["boulder", "boulder", "boulder", "clump"],
+    );
+    const s2 = computeStats(c2, 0.05);
+    // clump 는 통계 제외 → D50 동일, particleCount 동일
+    expect(s2.d50).toBeCloseTo(s1.d50, 0);
+    expect(s2.particleCount).toBe(s1.particleCount);
+    expect(s2.clumps.count).toBe(1);
   });
 });

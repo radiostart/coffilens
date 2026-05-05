@@ -44,6 +44,14 @@ export interface RecordEntity {
   clumpsCount?: number;
   clumpsAreaRatio?: number;
   clumpsTotalAreaMm2?: number;
+  /**
+   * 2026-05-05 추가 — boulder/clump 분리 (Phase 1).
+   * boulders = ≥1500µm 이지만 shape factor 가 단일 입자 형상 (boulder).
+   * 구 record 는 미저장 → 0 fallback (UI 에 boulder 0 표시).
+   */
+  bouldersCount?: number;
+  bouldersAreaRatio?: number;
+  bouldersTotalAreaMm2?: number;
   totalAreaMm2?: number;
   particleCount?: number;
   durationMs?: number;

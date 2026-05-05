@@ -10,6 +10,7 @@
 
 import { withMatScope } from "./mat-pool";
 import { imreadFromCanvas } from "./canvas-mat";
+import { probePartialCoinAtEdges } from "./partial-coin-probe";
 import type {
   AnalysisError,
   CandidateInfo,
@@ -489,6 +490,18 @@ export async function detectCoin(
     const numCircles = circles.cols;
 
     if (numCircles === 0) {
+      // **Edge-arc probe (2026-05-05)**: HoughCircles 가 0 circle 반환한 경우,
+      // 동전이 프레임 가장자리로 잘려서 full circle 인식 실패한 케이스 일 수 있음.
+      // regression batch (n=14) 에서 4장 fail 모두 edge-clip 케이스. probe 가
+      // 가장자리 닿은 arc 를 찾으면 partial_coin 으로 명시 분기 → UI 가 "동전이
+      // 잘렸어요" 안내 (vs. "동전이 보이지 않아요").
+      const arcHit = probePartialCoinAtEdges(gray, scope);
+      if (arcHit) {
+        console.log(
+          `[coin-detect] partial-coin probe hit: r=${arcHit.r.toFixed(0)} center=(${arcHit.cx.toFixed(0)},${arcHit.cy.toFixed(0)}) fit=${(arcHit.fitFrac * 100).toFixed(0)}%`,
+        );
+        throw { kind: "partial_coin" } satisfies AnalysisError;
+      }
       throw { kind: "no_coin" } satisfies AnalysisError;
     }
 
@@ -530,6 +543,17 @@ export async function detectCoin(
     );
 
     if (coinCandidates.length === 0) {
+      // **Edge-arc probe (2026-05-05)**: HoughCircles 가 후보를 찾았지만 모두
+      // reject 된 경우에도 partial coin 가능성 검사. regression 사례: 동전이
+      // 가장자리 잘림 → HoughCircles 가 그림자/배경을 1개 후보로 잡고 그건
+      // reject (too_dark) → 실제 coin 은 arc 만 보여 무시됨.
+      const arcHit = probePartialCoinAtEdges(gray, scope);
+      if (arcHit) {
+        console.log(
+          `[coin-detect] partial-coin probe hit (post-filter): r=${arcHit.r.toFixed(0)} center=(${arcHit.cx.toFixed(0)},${arcHit.cy.toFixed(0)}) fit=${(arcHit.fitFrac * 100).toFixed(0)}%`,
+        );
+        throw { kind: "partial_coin" } satisfies AnalysisError;
+      }
       // 검출된 모든 원형 후보 + 각 reject 이유 + 위치 라벨 → no_coin 에러에 첨부.
       // UI 가 v3 패턴 요약 / v2 자세히 expand 로 노출.
       const candidates: CandidateInfo[] = annotated

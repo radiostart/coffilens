@@ -61,6 +61,25 @@
   margin: 0;
 }
 
+.result-uniformity-grade {
+  display: block;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  letter-spacing: -0.01em;
+  margin-top: 2px;
+}
+
+/* 균일도 label — h4 사이즈 유지하되 "Very Poor" 같이 긴 단어 wrap 방지.
+   font-size 살짝 ↓ (14px) + nowrap → 9자 까지 한 줄에 안전. */
+.result-uniformity-label {
+  font-size: 14px;
+  line-height: var(--text-h4-line);
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: -0.02em;
+}
+
 .result-data-sep {
   color: var(--color-border);
   font-size: 18px;
@@ -138,6 +157,50 @@
 
 .result-retake-cta:active {
   transform: scale(0.98);
+}
+
+.result-retake-cta-sub {
+  font-size: var(--text-caption);
+  font-weight: 400;
+  opacity: 0.85;
+  margin-left: 4px;
+}
+
+.result-multishot-callout {
+  align-self: stretch;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-info-bg, rgba(59, 130, 246, 0.08));
+  border-left: 3px solid var(--color-info, #3b82f6);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: calc(-1 * var(--space-xs));
+}
+
+/* Confidence band — D50 headline 옆 작은 ±X 표기 + inline d10/d90 ±X */
+.result-diagnosis-band {
+  font-size: var(--text-h4);
+  font-weight: 500;
+  opacity: 0.6;
+  margin-left: var(--space-xs);
+  letter-spacing: -0.02em;
+}
+
+.result-band-suffix {
+  font-size: 0.6em;
+  font-weight: 400;
+  opacity: 0.55;
+  margin: 0 1px 0 2px;
+  letter-spacing: -0.02em;
+}
+
+/* ±band — 균일도 라벨처럼 값 아래 배치 (Excellent 와 동일 패턴) */
+.result-band-below {
+  display: block;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  letter-spacing: -0.01em;
+  margin-top: 2px;
 }
 
 .result-saved-toast {
@@ -383,4 +446,11 @@
 .result-clumps-meta {
   color: var(--color-text-secondary);
   margin: 0;
+  line-height: 1.5;
+}
+
+.result-clumps-hint {
+  font-size: 11px;
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+  font-style: italic;
 }

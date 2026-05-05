@@ -25,12 +25,19 @@ interface MockCv {
   Laplacian: ReturnType<typeof vi.fn>;
   meanStdDev: ReturnType<typeof vi.fn>;
   mean: ReturnType<typeof vi.fn>;
+  // partial-coin-probe (2026-05-05) 가 사용하는 함수들 — 0 circle 시 fallback.
+  Canny: ReturnType<typeof vi.fn>;
+  findContours: ReturnType<typeof vi.fn>;
+  boundingRect: ReturnType<typeof vi.fn>;
+  minEnclosingCircle: ReturnType<typeof vi.fn>;
   Mat: ReturnType<typeof vi.fn>;
   MatVector: ReturnType<typeof vi.fn>;
   Size: ReturnType<typeof vi.fn>;
   COLOR_RGBA2GRAY: number;
   HOUGH_GRADIENT: number;
   CV_64F: number;
+  RETR_EXTERNAL: number;
+  CHAIN_APPROX_NONE: number;
 }
 
 function makeMat(opts: Partial<MockMat> = {}): MockMat {
@@ -112,13 +119,24 @@ function setupCvMock(opts: {
     Laplacian: vi.fn(),
     meanStdDev: vi.fn(),
     mean: vi.fn(() => [opts.mean ?? 150, 0, 0, 0]),
+    // partial-coin-probe stubs — empty contours → no partial-coin hit, throws no_coin.
+    Canny: vi.fn(),
+    findContours: vi.fn(),
+    boundingRect: vi.fn(() => ({ x: 0, y: 0, width: 0, height: 0 })),
+    minEnclosingCircle: vi.fn(() => ({ center: { x: 0, y: 0 }, radius: 0 })),
     Mat: vi.fn(function MockMatCtor() {
       const m = matInstances[matCount % matInstances.length];
       matCount++;
       return m;
     }) as unknown as ReturnType<typeof vi.fn>,
     MatVector: vi.fn(function MockMatVecCtor() {
-      const m = makeMat();
+      // MatVector — partial-coin-probe 가 size()/get() 사용. empty 로 default.
+      const m = makeMat() as MockMat & {
+        size: () => number;
+        get: (i: number) => MockMat;
+      };
+      m.size = () => 0;
+      m.get = () => makeMat();
       return m;
     }) as unknown as ReturnType<typeof vi.fn>,
     Size: vi.fn(function MockSize(w: number, h: number) {
@@ -127,6 +145,8 @@ function setupCvMock(opts: {
     COLOR_RGBA2GRAY: 0,
     HOUGH_GRADIENT: 0,
     CV_64F: 0,
+    RETR_EXTERNAL: 0,
+    CHAIN_APPROX_NONE: 0,
   };
 
   vi.stubGlobal("cv", cv);

@@ -128,6 +128,13 @@ export function recordToPipelineResult(
         totalAreaMm2: r.clumpsTotalAreaMm2 ?? 0,
         areaRatio: r.clumpsAreaRatio ?? 0,
       },
+      // 구 record 는 boulders 필드 없음 (boulder/clump 분리 = 2026-05-05 도입)
+      // → 0 으로 fallback. 신규 record 부터 분리 통계 저장.
+      boulders: {
+        count: r.bouldersCount ?? 0,
+        totalAreaMm2: r.bouldersTotalAreaMm2 ?? 0,
+        areaRatio: r.bouldersAreaRatio ?? 0,
+      },
     },
     coin: {
       centerX: 0,

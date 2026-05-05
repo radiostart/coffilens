@@ -18,3 +18,6 @@ coverage/
 
 # Vendored from npm via scripts/sync-opencv.ts (postinstall)
 public/opencv.js
+
+# gstack local cache — batch-analyze 출력 등 로컬 분석 산출물
+.gstack/

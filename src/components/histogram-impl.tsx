@@ -3,6 +3,7 @@ import {
   Bar,
   Cell,
   ComposedChart,
+  Line,
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
@@ -10,7 +11,30 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { volumeWeightedPercentile } from "../opencv/statistics";
 import "./histogram-impl.css";
+
+/**
+ * **분포 line 5-zone average (2026-05-05)** — 5 구역의 bar 평균 높이를 잇는 선.
+ *
+ * 분포 형상 (PDF, peak/valley) 표현. 구역 = 부피 누적 % 경계. 구역 안의 dense bin
+ * weight 들을 평균해 line Y 로 사용 → 부드러운 분포 형상.
+ *
+ * 산업 표준 D10/D90 경계 + 중앙 3분할 (대칭):
+ *  zone[0]: 0~10%  미분 (D10 까지)
+ *  zone[1]: 10~35% 중앙 시작
+ *  zone[2]: 35~65% 중앙 (D50 중심)
+ *  zone[3]: 65~90% 중앙 끝 (D90 까지)
+ *  zone[4]: 90~100% 큰입자
+ */
+const ZONE_BOUNDARIES_PCT = [0, 10, 35, 65, 90, 100] as const;
+const ZONE_LABELS = [
+  "미분",
+  "중앙 시작",
+  "중앙",
+  "중앙 끝",
+  "큰입자",
+] as const;
 
 interface HistogramImplProps {
   diameters: number[];
@@ -25,9 +49,15 @@ interface HistogramBin {
   range: number;
   /** Bin 의 오른쪽 가장자리 (μm). 테이블 구간 표시용. */
   rangeMax: number;
-  /** 이 bin 에 속한 raw 입자 개수. Bar dataKey, Y축. */
+  /** 이 bin 에 속한 raw 입자 개수. tooltip + 테이블 표시용. */
   count: number;
-  /** count / total × 100. tooltip + 테이블 표시용. */
+  /**
+   * 이 bin 의 부피 가중치 — sum(d³) of particles in bin (μm³ 단위).
+   * Bar dataKey, Y축. volume-weighted distribution (산업 표준 일치).
+   * 2026-05-05 count → volume 전환 (statistics.ts 와 일관성).
+   */
+  weight: number;
+  /** weight / totalWeight × 100. volume-weighted percentage. */
   percentage: number;
   /**
    * "fines"  = lowerBound 미만 (작은 outlier),
@@ -39,12 +69,18 @@ interface HistogramBin {
   actualMin?: number;
   /** outlier bin 의 실제 최대값. */
   actualMax?: number;
+  /** 8-anchor 분포 line Y 값 — 이 X 가 anchor 인 entry 만 set. */
+  lineY?: number;
+  /** anchor 라벨 (tooltip 표시용). */
+  anchorLabel?: string;
 }
 
 interface AnnotatedBin extends HistogramBin {
-  displayCount: number;
+  /** Bar Y 값 — anchor entry 는 undefined → Bar 자동 skip. */
+  displayWeight?: number;
   inCore: boolean;
 }
+
 
 // 200µm 미만은 sub-pixel noise — main bin 에서 빼고 fines outlier 로 collapse.
 // computeStats 의 FINES_THRESHOLD 와 별개 (binning 표시용).
@@ -60,6 +96,8 @@ const MARKER_COLOR = "#C97B3F";
 const MARKER_STRONG = "#A85F2E";
 const LABEL_COLOR = "#1A1410";
 const VALUE_COLOR = "#6B6157";
+// 분포 line — bar(brown) / marker(orange) 와 구분되는 green-teal.
+const LINE_COLOR = "#4A8B5C";
 
 /**
  * X축 아래 marker — ▼ + 한국어 라벨 + μm 값 (3행 텍스트). D50 은 "strong" variant.
@@ -121,21 +159,21 @@ export default function HistogramImpl({
 }: HistogramImplProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const { data, countDomainMax, totalCount } = useMemo(() => {
+  const { data, countDomainMax, lineDomainMax, totalCount } = useMemo(() => {
     const rawData = buildBins(diameters, bins);
-    const sortedCounts = rawData
-      .map((d) => d.count)
-      .filter((c) => c > 0)
+    // **Volume-weighted Y axis (2026-05-05)** — bar 높이는 weight (sum of d³).
+    // count → weight 전환으로 D-line 과 시각적 일치 (volume-weighted 산업 표준).
+    const sortedWeights = rawData
+      .map((d) => d.weight)
+      .filter((w) => w > 0)
       .sort((a, b) => a - b);
-    const p75Idx = Math.floor(sortedCounts.length * Y_AXIS_PERCENTILE);
-    const p75Count = sortedCounts[p75Idx] ?? 1;
-    const cap = Math.max(1, Math.round(p75Count * Y_AXIS_DOMAIN_MULTIPLIER));
+    const p75Idx = Math.floor(sortedWeights.length * Y_AXIS_PERCENTILE);
+    const p75Weight = sortedWeights[p75Idx] ?? 1;
+    const cap = Math.max(1, p75Weight * Y_AXIS_DOMAIN_MULTIPLIER);
 
-    // recharts 의 domain max + clipPath 가 라운드 corner 를 같이 잘라내므로
-    // displayCount 로 데이터 자체를 cap. tooltip/table 은 raw `count` 사용.
     const annotated: AnnotatedBin[] = rawData.map((b) => ({
       ...b,
-      displayCount: Math.min(b.count, cap),
+      displayWeight: Math.min(b.weight, cap),
       inCore:
         !b.outlier &&
         d10 !== undefined &&
@@ -143,8 +181,135 @@ export default function HistogramImpl({
         b.range >= d10 &&
         b.range <= d90,
     }));
+
+    // **5-zone 분포 line — percentage 기반 (2026-05-05)** — 구역별 부피 비율.
+    // 각 zone = 누적 부피 % 구간 → diameter range 변환 → 그 range 안의 dense bin
+    // weight 합. 합을 totalWeight 로 나눠 percentage (0~100) 로 변환.
+    // **dual Y axis**: bar 는 weight (좌, 기존 cap), line 은 percentage (우 hidden).
+    // → bar 크기 유지 + line 자기 axis fully 사용. 시각 trend 만 표시.
+    //
+    // **D-marker 정렬**: bin 의 range 를 left-edge → bin center 로 변환해
+    // bar/line dot 모두 bin 중앙 X 에 위치 → D50 marker 와 시각 정렬.
+    let linePctCap = 0;
+    if (diameters.length > 0 && rawData.length > 0) {
+      const sortedAsc = [...diameters].sort((a, b) => a - b);
+      const denseBins = annotated.filter((b) => !b.outlier);
+      // 전체 weight (dense + outlier 포함) — percentage 분모
+      const totalWeight = annotated.reduce((s, b) => s + b.weight, 0) || 1;
+      // Zone 별 부분 합 + line attach (percentage 변환)
+      const zoneSums: { idx: number; sumWeight: number; label: string }[] = [];
+      for (let zi = 0; zi < ZONE_LABELS.length; zi++) {
+        const pLo = ZONE_BOUNDARIES_PCT[zi] / 100;
+        const pHi = ZONE_BOUNDARIES_PCT[zi + 1] / 100;
+        const dLo = volumeWeightedPercentile(sortedAsc, pLo);
+        const dHi = volumeWeightedPercentile(sortedAsc, pHi);
+        const pMid = (pLo + pHi) / 2;
+        const dCenter = volumeWeightedPercentile(sortedAsc, pMid);
+        const logCenter = Math.log10(dCenter);
+        const binsInZone = denseBins.filter((b) => {
+          const c = (b.range + b.rangeMax) / 2;
+          return c >= dLo && c <= dHi;
+        });
+        let sumWeight = 0;
+        if (binsInZone.length > 0) {
+          sumWeight = binsInZone.reduce((s, b) => s + b.weight, 0);
+        } else {
+          let nearest: AnnotatedBin | null = null;
+          let nearestDist = Infinity;
+          for (const b of denseBins) {
+            const c = (b.range + b.rangeMax) / 2;
+            const dist = Math.abs(Math.log10(c) - logCenter);
+            if (dist < nearestDist) {
+              nearestDist = dist;
+              nearest = b;
+            }
+          }
+          sumWeight = nearest?.weight ?? 0;
+        }
+        // line attach: zone center 와 가장 가까운 dense bin
+        let bestIdx = -1;
+        let bestDist = Infinity;
+        for (let bi = 0; bi < annotated.length; bi++) {
+          const b = annotated[bi];
+          if (b.outlier) continue;
+          const c = (b.range + b.rangeMax) / 2;
+          const dist = Math.abs(Math.log10(c) - logCenter);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = bi;
+          }
+        }
+        if (bestIdx >= 0) {
+          zoneSums.push({ idx: bestIdx, sumWeight, label: ZONE_LABELS[zi] });
+        }
+      }
+      // 합 → percentage 변환, line attach
+      for (const z of zoneSums) {
+        const pct = (z.sumWeight / totalWeight) * 100;
+        const target = annotated[z.idx];
+        if (target.lineY === undefined || pct > target.lineY) {
+          target.lineY = pct;
+          target.anchorLabel = z.label;
+        }
+        if (pct > linePctCap) linePctCap = pct;
+      }
+
+      // 시작/끝 anchor — outlier 또는 첫/마지막 dense bin, percentage 변환
+      const finesIdx = annotated.findIndex((b) => b.outlier === "fines");
+      if (finesIdx >= 0) {
+        annotated[finesIdx].lineY =
+          (annotated[finesIdx].weight / totalWeight) * 100;
+        annotated[finesIdx].anchorLabel = "시작";
+      } else {
+        const firstIdx = annotated.findIndex((b) => !b.outlier);
+        if (firstIdx >= 0 && annotated[firstIdx].lineY === undefined) {
+          annotated[firstIdx].lineY =
+            (annotated[firstIdx].weight / totalWeight) * 100;
+          annotated[firstIdx].anchorLabel = "시작";
+        }
+      }
+      const coarseIdx = annotated.findIndex((b) => b.outlier === "coarse");
+      if (coarseIdx >= 0) {
+        annotated[coarseIdx].lineY =
+          (annotated[coarseIdx].weight / totalWeight) * 100;
+        annotated[coarseIdx].anchorLabel = "끝";
+      } else {
+        let lastIdx = -1;
+        for (let i = annotated.length - 1; i >= 0; i--) {
+          if (!annotated[i].outlier) {
+            lastIdx = i;
+            break;
+          }
+        }
+        if (lastIdx >= 0 && annotated[lastIdx].lineY === undefined) {
+          annotated[lastIdx].lineY =
+            (annotated[lastIdx].weight / totalWeight) * 100;
+          annotated[lastIdx].anchorLabel = "끝";
+        }
+      }
+
+      // **range → bin center 변환** (D-marker 정렬용).
+      // bar/line dot 모두 X = bin geometric center (log mid) → orange marker (D50)
+      // 와 가장 가까운 bin 의 dot 가 정확히 정렬됨.
+      for (const b of annotated) {
+        if (b.outlier) continue;
+        b.range = Math.round(
+          Math.pow(10, (Math.log10(b.range) + Math.log10(b.rangeMax)) / 2),
+        );
+      }
+    }
+    // Bar Y axis cap — 기존 그대로 (line 이 별도 axis 사용).
+    const finalCap = cap;
+    // Line Y axis cap — max zone percentage × 1.1 (headroom).
+    const linePctDomain = Math.max(linePctCap * 1.1, 1);
+
     const total = rawData.reduce((sum, d) => sum + d.count, 0);
-    return { data: annotated, countDomainMax: cap, totalCount: total };
+    return {
+      data: annotated,
+      countDomainMax: finalCap,
+      lineDomainMax: linePctDomain,
+      totalCount: total,
+    };
   }, [diameters, bins, d10, d90]);
 
   if (data.length === 0) {
@@ -176,7 +341,7 @@ export default function HistogramImpl({
         <ComposedChart
           data={data}
           margin={{ top: 32, right: 16, left: 16, bottom: 60 }}
-          barCategoryGap="20%"
+          barCategoryGap="10%"
         >
           {/* 커피 분쇄는 log-normal (Rosin-Rammler) — log scale 이 자연스러운 bell. */}
           <XAxis
@@ -187,11 +352,19 @@ export default function HistogramImpl({
             tick={false}
             axisLine={{ stroke: "var(--color-border)" }}
           />
-          {/* 동적 Y range — outlier 가 Y 차지하지 않도록 cap, 초과 bar 는 clip. */}
+          {/* Bar Y axis (좌, hidden) — bar 기존 cap 유지. */}
           <YAxis
             yAxisId="count"
             orientation="left"
-            domain={[0, countDomainMax]}
+            domain={[0, countDomainMax * 1.1]}
+            allowDataOverflow
+            hide
+          />
+          {/* Line Y axis (우, hidden) — zone percentage. bar 와 독립. */}
+          <YAxis
+            yAxisId="line"
+            orientation="right"
+            domain={[0, lineDomainMax]}
             allowDataOverflow
             hide
           />
@@ -205,15 +378,23 @@ export default function HistogramImpl({
               if (value === null || value === undefined) return ["—", name];
               const numValue = typeof value === "number" ? value : Number(value);
               if (Number.isNaN(numValue)) return ["—", name];
-              if (name === "입자 개수") {
+              if (name === "부피 비율") {
                 const payload = item?.payload as
                   | { count?: number; percentage?: number }
                   | undefined;
-                const actualCount = payload?.count ?? Math.round(numValue);
                 const pct = payload?.percentage;
                 const pctStr =
-                  typeof pct === "number" ? ` (${pct.toFixed(1)}%)` : "";
-                return [`${actualCount}개${pctStr}`, name];
+                  typeof pct === "number" ? `${pct.toFixed(1)}%` : "—";
+                const countStr = payload?.count
+                  ? ` (입자 ${payload.count}개)`
+                  : "";
+                return [`${pctStr}${countStr}`, name];
+              }
+              if (name === "분포") {
+                const payload = item?.payload as
+                  | { anchorLabel?: string }
+                  | undefined;
+                return [payload?.anchorLabel ?? "—", name];
               }
               return [`${numValue}`, name];
             }}
@@ -230,8 +411,8 @@ export default function HistogramImpl({
             />
           )}
           <Bar
-            dataKey="displayCount"
-            name="입자 개수"
+            dataKey="displayWeight"
+            name="부피 비율"
             yAxisId="count"
             fill={PRIMARY_STRONG}
             radius={[6, 6, 0, 0]}
@@ -244,6 +425,19 @@ export default function HistogramImpl({
               />
             ))}
           </Bar>
+          {/* 8-anchor 분포 line — line 전용 Y axis (percentage), bar 와 독립. */}
+          <Line
+            dataKey="lineY"
+            yAxisId="line"
+            name="분포"
+            type="monotone"
+            stroke={LINE_COLOR}
+            strokeWidth={2}
+            dot={{ r: 3, fill: LINE_COLOR, stroke: "none" }}
+            activeDot={{ r: 5, fill: LINE_COLOR, stroke: "white", strokeWidth: 2 }}
+            connectNulls
+            isAnimationActive={false}
+          />
           {markers.map((m) => {
             const isStrong = m.variant === "strong";
             return (
@@ -252,7 +446,7 @@ export default function HistogramImpl({
                 yAxisId="count"
                 x={Math.round(m.x)}
                 stroke={isStrong ? MARKER_STRONG : MARKER_COLOR}
-                strokeWidth={isStrong ? 2 : 1.5}
+                strokeWidth={isStrong ? 2.5 : 2}
                 strokeDasharray={isStrong ? "5 3" : "3 3"}
                 ifOverflow="extendDomain"
                 label={
@@ -296,7 +490,7 @@ export default function HistogramImpl({
                     개수
                   </th>
                   <th scope="col" className="col-percent">
-                    비율
+                    부피 비율
                   </th>
                 </tr>
               </thead>
@@ -356,14 +550,17 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
   if (diameters.length === 0) return [];
   const sorted = [...diameters].sort((a, b) => a - b);
   const total = sorted.length;
+  // 전체 부피 — volume-weighted percentage 계산용.
+  const totalVolume = sorted.reduce((s, d) => s + d * d * d, 0) || 1;
+  // **Volume-weighted P5/P95 (2026-05-05)** — bin 범위도 volume-percentile 기준.
+  // count-percentile 로 잡으면 (이전 버그): 미분 입자 수가 많아 P95 이 작은 값에
+  // 머무름 → D50/D90 (volume-weighted) 가 bin 범위 밖으로 떨어져 그래프에 미반영.
+  // bin 과 D-line 모두 volume-weighted 로 일관성 있게 정렬.
+  const volP5 = volumeWeightedPercentile(sorted, 0.05);
+  const volP95 = volumeWeightedPercentile(sorted, 0.95);
   // P5 가 200µm 미만이면 200 부터 main bin 시작 — sub-200 노이즈는 fines outlier.
-  const p5Index = Math.floor(total * 0.05);
-  const p95Index = Math.floor(total * 0.95);
-  const lowerBound = Math.max(
-    sorted[Math.min(p5Index, total - 1)],
-    MIN_DISPLAY_DIAMETER_UM,
-  );
-  const upperBound = sorted[Math.min(p95Index, total - 1)];
+  const lowerBound = Math.max(volP5, MIN_DISPLAY_DIAMETER_UM);
+  const upperBound = volP95;
 
   const logMin = Math.log10(lowerBound);
   const logMax = Math.log10(upperBound);
@@ -375,6 +572,7 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
         range: Math.round(lowerBound),
         rangeMax: Math.round(lowerBound),
         count: total,
+        weight: totalVolume,
         percentage: 100,
       },
     ];
@@ -382,14 +580,17 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
 
   const result: HistogramBin[] = [];
 
-  const finesCount = sorted.filter((d) => d < lowerBound).length;
+  const finesParticles = sorted.filter((d) => d < lowerBound);
+  const finesCount = finesParticles.length;
   if (finesCount > 0) {
+    const finesWeight = finesParticles.reduce((s, d) => s + d * d * d, 0);
     const finesPos = Math.pow(10, logMin - logBinWidth);
     result.push({
       range: Math.round(finesPos),
       rangeMax: Math.round(lowerBound),
       count: finesCount,
-      percentage: (finesCount / total) * 100,
+      weight: finesWeight,
+      percentage: (finesWeight / totalVolume) * 100,
       outlier: "fines",
       actualMin: Math.round(sorted[0]),
       actualMax: Math.round(lowerBound),
@@ -400,25 +601,31 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
     const lo = Math.pow(10, logMin + i * logBinWidth);
     const hi = Math.pow(10, logMin + (i + 1) * logBinWidth);
     const isLast = i === bins - 1;
-    const count = diameters.filter((d) =>
+    const inBin = diameters.filter((d) =>
       isLast ? d >= lo && d <= hi : d >= lo && d < hi,
-    ).length;
+    );
+    const count = inBin.length;
+    const weight = inBin.reduce((s, d) => s + d * d * d, 0);
     result.push({
       range: Math.round(lo),
       rangeMax: Math.round(hi),
       count,
-      percentage: (count / total) * 100,
+      weight,
+      percentage: (weight / totalVolume) * 100,
     });
   }
 
-  const coarseCount = sorted.filter((d) => d > upperBound).length;
+  const coarseParticles = sorted.filter((d) => d > upperBound);
+  const coarseCount = coarseParticles.length;
   if (coarseCount > 0) {
+    const coarseWeight = coarseParticles.reduce((s, d) => s + d * d * d, 0);
     const coarsePosMax = Math.pow(10, logMax + logBinWidth);
     result.push({
       range: Math.round(upperBound),
       rangeMax: Math.round(coarsePosMax),
       count: coarseCount,
-      percentage: (coarseCount / total) * 100,
+      weight: coarseWeight,
+      percentage: (coarseWeight / totalVolume) * 100,
       outlier: "coarse",
       actualMin: Math.round(upperBound),
       actualMax: Math.round(sorted[sorted.length - 1]),

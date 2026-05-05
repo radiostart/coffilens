@@ -1,5 +1,62 @@
 {
   "version": 1,
+  "phase1_boulder_clump_baseline_2026_05_05": {
+    "description": "Phase 1 boulder/clump 분리 — 실 fixture 검증 결과. 임계값 calibration 기반 (BOULDER_MIN_CIRCULARITY=0.55, BOULDER_MIN_SOLIDITY=0.80).",
+    "monotonic_check": "fine grind → coarse grind 따라 boulder ratio 단조 증가 (진짜 grinder 진단 metric)",
+    "results": {
+      "test-500-fine.jpg (spent puck, 응집 극심)":     { "boulder_pct": 0.6, "clump_pct": 65.1 },
+      "test-vs3-09.jpg (VS3 @ 9, fine moka)":          { "boulder_pct": 0.0, "clump_pct": 38.4 },
+      "test-vs3-11.jpg (VS3 @ 11, pour over)":         { "boulder_pct": 6.6, "clump_pct": 31.8 },
+      "test-vs3-13.jpg (VS3 @ 13, FRENCH PRESS)":      { "boulder_pct": 8.6, "clump_pct": 26.8 },
+      "test-vs3-500.jpg (VS3 @ 11.5, multi-coin)":     { "boulder_pct": 2.3, "clump_pct": 62.0 },
+      "test-vs3-100.jpg (VS3 @ 11.5, 100 coin)":       { "boulder_pct": 4.4, "clump_pct": 63.5 },
+      "multi-shot/14장 (fine grind, n=10 success)":    { "boulder_pct_mean": 0.37, "clump_pct_mean": 18.9 }
+    },
+    "shapeFactor_observations": {
+      "circularity_p50": {
+        "spent_puck":      0.10,
+        "VS3_9_fine":      0.07,
+        "VS3_11_pourover": 0.39,
+        "VS3_13_french":   0.38
+      },
+      "solidity_p50": {
+        "spent_puck":      0.42,
+        "VS3_9_fine":      0.40,
+        "VS3_11_pourover": 0.73,
+        "VS3_13_french":   0.71
+      },
+      "calibration_insight": "Fine vs Coarse 의 circ p50 4-5x 차이. ISO 13322-1 (sphere assumption) 임계 0.78/0.90 은 fractured coffee 입자에 strict 너무, empirical 0.55/0.80 으로 완화."
+    }
+  },
+  "phase2_boulder_in_dvalue_2026_05_05": {
+    "description": "Phase 2 — boulder 를 D-value 통계에 포함 (clump 만 제외). 산업 표준 PSD 측정 정확도 ↑.",
+    "intent": "boulder = real measurement (single large particle) → 통계 포함. clump = artifact → 제외.",
+    "impact_summary": {
+      "fine_grind": "거의 변화 없음 (boulder 0~1% 라 D-value 영향 미미)",
+      "coarse_grind": "D90 정상화 — 이전엔 boulder 가 통계에서 빠져 D90 truncation",
+      "spent_puck": "변화 미세 (+3~4%, boulder 0.6% 라 영향 작음)"
+    },
+    "before_after_dvalues": {
+      "test-500-fine.jpg":    { "p1_d50": 544, "p2_d50": 565, "p1_d90": 872, "p2_d90": 898, "delta_d50_pct": 4 },
+      "test-vs3-09.jpg":      { "p1_d50": 456, "p2_d50": 456, "p1_d90": 755, "p2_d90": 755, "delta_d50_pct": 0 },
+      "test-vs3-11.jpg":      { "p1_d50": 700, "p2_d50": 748, "p1_d90": 889, "p2_d90": 1026, "delta_d50_pct": 7 },
+      "test-vs3-13.jpg":      { "p1_d50": 715, "p2_d50": 784, "p1_d90": 891, "p2_d90": 1077, "delta_d50_pct": 10, "delta_d90_pct": 21, "comment": "★ French Press 정상화" },
+      "test-vs3-500.jpg":     { "p1_d50": 723, "p2_d50": 751, "p1_d90": 905, "p2_d90": 966, "delta_d50_pct": 4 },
+      "multi-shot/14장":       { "p1_d50_mean": 643.5, "p2_d50_mean": 646.6, "p1_cov": 0.039, "p2_cov": 0.040, "delta_pct": 0.5 }
+    },
+    "calibration_review": {
+      "current_ratio": 0.63,
+      "vs3_11_anchor": { "phase2_image_d50": 1187, "target_sieve_d50": 700, "implied_ratio": 0.59 },
+      "vs3_13_anchor": { "phase2_image_d50": 1244, "target_sieve_d50_fp_standard": 1100, "implied_ratio": 0.88 },
+      "decision": "Anchor 별 ratio 가 0.59~0.88 으로 spread — 진짜 sieve ground truth 없이 단정 어려움. 현재 0.63 유지 (두 값 중간).",
+      "future_work": "사용자 sieve 분급 ground truth 확보 시 grind-size-aware ratio (또는 다중 anchor 보간) 검토."
+    },
+    "brewing_guide_review": {
+      "thresholds_unchanged": true,
+      "comment": "Phase 1 vs Phase 2 모두 동일 분류 (vs3-09 fine, others medium). 임계값 (fine<500, medium 500~900, coarse>900) 조정 불필요.",
+      "vs3_13_french_press_observation": "사용자 의도 'French Press' 였으나 D50=784 (medium 범위). VS3 @ 13 이 진정한 FP 보다 fine 하거나, calibration 이 coarse grind 에서 약간 underestimate. 진정한 FP 측정 시 사용자가 더 거친 setting 사용 권장."
+    }
+  },
   "fixtures": [
     {
       "file": "test-500-fine.jpg",

@@ -61,12 +61,19 @@ import type { ParticleStats } from "./statistics";
 /**
  * Image-measured 직경에 곱하면 sieve-equivalent 직경이 나오는 비율.
  *
- * 1.7 — Setting 11 (V60 pour-over) 브라우저 측정 anchor (2026-05-02 후속 수정).
- * 핸드드립 우선 정책. 다른 grind 영역은 fundamental 한계 인정.
+ * **2026-05-05 재anchor**: D-값 계산을 count-percentile → volume-weighted percentile
+ * 로 전환 (statistics.ts). 산업 표준 (Malvern D[v,0.5], sieve mass-weighted) 일치
+ * 정책. count → volume 으로 D50 자체 값이 ~2.7x 커짐 (V60 anchor 414 → 1110).
  *
- * 이전 3.3 은 tune-pipeline EXIF 버그로 인한 잘못된 측정값 기반 — 수정 후 폐기.
+ * Setting 11 (V60 pour-over) — fixtures/test-vs3-11.jpg, 브라우저 anchor:
+ *   - mmPerPx = 0.170 (정확)
+ *   - image volume-D50 ≈ 1110μm
+ *   - sieve target: V60 표준 700μm
+ *   - ratio = 700 / 1110 ≈ **0.63**
+ *
+ * 이전 1.7 은 count-D50 (414) 기반 — volume-D50 (1110) 와 일관성 X. 재anchor 필수.
  */
-export const IMAGE_TO_SIEVE_RATIO = 1.7;
+export const IMAGE_TO_SIEVE_RATIO = 0.63;
 
 /**
  * computeStats 출력에 image → sieve 변환 적용.

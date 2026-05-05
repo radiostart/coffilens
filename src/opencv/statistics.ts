@@ -18,6 +18,9 @@
 
 declare const cv: {
   contourArea: (contour: CvMat) => number;
+  arcLength: (contour: CvMat, closed: boolean) => number;
+  convexHull: (points: CvMat, hull: CvMat) => void;
+  Mat: new () => CvMat;
 };
 
 interface CvMat {
@@ -28,6 +31,38 @@ interface CvMatVector {
   size: () => number;
   get: (index: number) => CvMat;
 }
+
+/**
+ * **Boulder vs Clump 분리 임계값** (2026-05-05 Phase 1).
+ *
+ * ≥ CLUMP_MIN_DIAMETER_UM (1500µm) 입자를 size-only 로 모두 제외하던 로직 →
+ * shape factor 로 boulder (단일 큰 입자) vs clump (응집) 분리.
+ *
+ *   circularity = 4π × area / perimeter²
+ *     - 완전 원: 1.0
+ *     - 각진 단일 입자: 0.7~0.9 (커피는 fractured)
+ *     - clump (응집체, 경계 복잡): < 0.7
+ *
+ *   solidity = area / convexHullArea
+ *     - 단일 입자 (오목 없음): > 0.9
+ *     - clump (오목 boundary): < 0.85
+ *
+ * **임계값 (2026-05-05 calibrated from real fixtures)**:
+ *   boulder: circ ≥ 0.55 AND solidity ≥ 0.80
+ *   else   : clump
+ *
+ * **calibration 데이터** (real fixture shape p50):
+ *   spent puck (응집 극한):  circ 0.10, sol 0.42 → 0% boulder ✓
+ *   VS3 @ 9 (moka fine):     circ 0.07, sol 0.40 → 0% boulder ✓
+ *   VS3 @ 11 (pour over):    circ 0.39, sol 0.73 → top 25% boulder ✓
+ *   VS3 @ 13 (French Press): circ 0.38, sol 0.71 → top 25% boulder ✓
+ *
+ * 합성 fixture (완벽 원형) 으론 0.78/0.90 도 통과하지만, 실 photo 의 fractured
+ * 입자 + over-segmentation 으로 임계 완화 필요. ISO 13322-1 의 spherical 가정은
+ * 커피 입자에 부적합 — empirical fixture-based calibration 이 우선.
+ */
+const BOULDER_MIN_CIRCULARITY = 0.55;
+const BOULDER_MIN_SOLIDITY = 0.8;
 
 export interface ParticleStats {
   d10: number;
@@ -41,7 +76,18 @@ export interface ParticleStats {
   totalAreaMm2: number;
   /** 정렬된 직경 배열 (μm) — 히스토그램 입력 (F07) */
   diameters: number[];
-  /** 클럼프 (분쇄가 안 된 덩어리, 통계에서 제외된 입자) 통계 */
+  /**
+   * **Boulder** (단일 큰 입자, ≥ 1500µm 이지만 shape factor 가 단일 입자 형상).
+   * D-value 통계에서는 제외 (분포 noise 영향 방지). UI 에 별도 표기.
+   * 의미: French Press 그라인드의 정상 큰 입자, burr alignment 진단 신호.
+   */
+  boulders: {
+    count: number;
+    totalAreaMm2: number;
+    /** 전체 면적 대비 boulder 면적 비율 (백분율 0~100) */
+    areaRatio: number;
+  };
+  /** 클럼프 (분쇄가 안 된 덩어리 / 응집체, 통계에서 제외) — 분쇄 품질 진단 신호 */
   clumps: {
     count: number;
     totalAreaMm2: number;
@@ -142,6 +188,17 @@ interface DerivedSummary {
 /**
  * D10/D50/D90 + uniformity + finesPercent + clumpAreaRatio 산출.
  *
+ * **Volume-weighted percentile (2026-05-05 변경)** — 산업 표준 (Malvern laser
+ * diffraction D[v,0.5], sieve mass-weighted) 일치. 이전 count-based 는 미세
+ * 입자 수가 많아 D50 이 fines 쪽으로 끌려가는 systematic bias 가 있었음.
+ * 14장 회귀 (2026-05-05) 에서 사용자 피드백: "D50 이 분포 왼쪽에 떨어져 있다".
+ *
+ *   count-D50 = 입자 수 절반이 이 값 이하 (작은 입자 쏠림)
+ *   volume-D50 = 전체 부피의 절반이 이 값 이하 (산업 표준, 사용자 직관 일치)
+ *
+ * 가중치: d³ (구체 부피 가정). 2D image projection 한계 인지하고도 가장 가까운
+ * 산업 표준 매핑. 면적 가중 (d²) 도 가능하나 sieve scale 과 일관성 위해 d³ 채택.
+ *
  * D-값은 sub-pixel noise 제외 (MAIN_FRACTION_MIN_UM = 117 image ≈ 200 sieve).
  * main fraction 이 비면 (모두 sub-200 인 극단 케이스) 전체 diameters 로 fallback.
  *
@@ -155,9 +212,9 @@ function summarize(
 ): DerivedSummary {
   const mainFraction = diameters.filter((d) => d >= MAIN_FRACTION_MIN_UM);
   const dValueSource = mainFraction.length > 0 ? mainFraction : diameters;
-  const d10 = percentile(dValueSource, 0.1);
-  const d50 = percentile(dValueSource, 0.5);
-  const d90 = percentile(dValueSource, 0.9);
+  const d10 = volumeWeightedPercentile(dValueSource, 0.1);
+  const d50 = volumeWeightedPercentile(dValueSource, 0.5);
+  const d90 = volumeWeightedPercentile(dValueSource, 0.9);
   const uniformity = d10 > 0 ? d90 / d10 : Infinity;
   const finesPercent =
     totalAreaMm2 > 0 ? (finesAreaMm2 / totalAreaMm2) * 100 : 0;
@@ -173,28 +230,60 @@ export function computeStats(
   mmPerPixel: number,
 ): ParticleStats {
   // 1단계: 모든 contour 의 직경 + 면적 수집 (배경/노이즈 1차 필터)
+  // shape factor 는 ≥ CLUMP_MIN_DIAMETER 입자에만 계산 (perf 최적화).
   const minDiameterUm = computeMinDiameter(mmPerPixel);
-  const candidates: Array<{ diameterUm: number; areaMm2: number }> = [];
+  // shape 정보 포함 candidate. circularity/solidity 는 large 입자만 채워짐.
+  const candidates: Array<{
+    diameterUm: number;
+    areaMm2: number;
+    circularity?: number;
+    solidity?: number;
+  }> = [];
   // diagnostic: 필터별 카운트 + raw 분포 통계 (DEBUG_STATS=1 시 출력)
   let belowMinCount = 0;
   let aboveMaxCount = 0;
   const rawDiameters: number[] = [];
 
+  // hull scratch Mat — 이터레이션 간 재사용, 최종 dispose.
+  const hullScratch = new cv.Mat();
+
   const numContours = contours.size();
   for (let i = 0; i < numContours; i++) {
     const c = contours.get(i);
     const areaPx = cv.contourArea(c);
-    try {
-      c.delete();
-    } catch {
-      /* ignore */
-    }
-
     const areaMm2 = areaPx * mmPerPixel ** 2;
     const diameterMm = 2 * Math.sqrt(areaMm2 / Math.PI);
     const diameterUm = diameterMm * 1000;
 
     rawDiameters.push(diameterUm);
+
+    // shape metric — large 입자만 (boulder vs clump 판정용).
+    let circularity: number | undefined;
+    let solidity: number | undefined;
+    if (
+      diameterUm >= CLUMP_MIN_DIAMETER_UM &&
+      diameterUm <= MAX_PARTICLE_DIAMETER_UM
+    ) {
+      try {
+        const perimeterPx = cv.arcLength(c, true);
+        if (perimeterPx > 0) {
+          circularity = (4 * Math.PI * areaPx) / (perimeterPx * perimeterPx);
+        }
+        cv.convexHull(c, hullScratch);
+        const hullAreaPx = cv.contourArea(hullScratch);
+        if (hullAreaPx > 0) {
+          solidity = areaPx / hullAreaPx;
+        }
+      } catch {
+        // jsdom mock 또는 OpenCV 예외 — shape unknown, fallback 으로 clump 분류.
+      }
+    }
+
+    try {
+      c.delete();
+    } catch {
+      /* ignore */
+    }
 
     if (diameterUm < minDiameterUm) {
       belowMinCount++;
@@ -205,7 +294,13 @@ export function computeStats(
       continue;
     }
 
-    candidates.push({ diameterUm, areaMm2 });
+    candidates.push({ diameterUm, areaMm2, circularity, solidity });
+  }
+
+  try {
+    hullScratch.delete();
+  } catch {
+    /* ignore */
   }
 
   if (candidates.length === 0) {
@@ -218,16 +313,50 @@ export function computeStats(
   const tempD50 = percentile(tempSorted, 0.5);
   const clumpThresholdUm = CLUMP_MIN_DIAMETER_UM;
 
-  // 3단계: 클럼프 분리. 정상 입자 통계와 분리 보고.
+  // 3단계: large 입자를 boulder vs clump 로 분리 (shape factor 기반).
+  // **Phase 2 (2026-05-05)**: boulder = real measurement → D-value 통계 포함.
+  //   clump = artifact (over-segmentation 또는 응집체) → 계속 제외.
+  //
+  // 의도: French Press 같은 거친 분쇄에서 D90 truncation 해소.
+  // 영향: fine grind 는 boulder 거의 없어 D-value 변화 미미. coarse grind 는
+  //       D90 정상화 (이전엔 boulder 8.6% area 가 통계에서 빠졌음).
   const diameters: number[] = [];
   let totalAreaMm2 = 0;
   let finesAreaMm2 = 0;
   let clumpCount = 0;
   let clumpAreaMm2 = 0;
-  for (const { diameterUm, areaMm2 } of candidates) {
+  let boulderCount = 0;
+  let boulderAreaMm2 = 0;
+  // diagnostic shape factor 분포 (DEBUG_STATS=1 시) — boulder 임계값 튜닝용.
+  const shapeDebug: Array<{ d: number; c: number; s: number }> = [];
+  for (const cand of candidates) {
+    const { diameterUm, areaMm2, circularity, solidity } = cand;
     if (diameterUm > clumpThresholdUm) {
-      clumpCount++;
-      clumpAreaMm2 += areaMm2;
+      if (
+        circularity !== undefined &&
+        solidity !== undefined &&
+        typeof globalThis.process !== "undefined" &&
+        globalThis.process?.env?.DEBUG_STATS === "1"
+      ) {
+        shapeDebug.push({ d: diameterUm, c: circularity, s: solidity });
+      }
+      // shape factor 로 boulder vs clump 판정. shape unknown (예외 발생) → clump.
+      const isBoulder =
+        circularity !== undefined &&
+        solidity !== undefined &&
+        circularity >= BOULDER_MIN_CIRCULARITY &&
+        solidity >= BOULDER_MIN_SOLIDITY;
+      if (isBoulder) {
+        boulderCount++;
+        boulderAreaMm2 += areaMm2;
+        // **Phase 2**: boulder 를 D-value 통계에 포함.
+        diameters.push(diameterUm);
+        totalAreaMm2 += areaMm2;
+        // boulder 는 ≥1500µm 이라 fines threshold (300µm) 안 걸림.
+      } else {
+        clumpCount++;
+        clumpAreaMm2 += areaMm2;
+      }
       continue;
     }
     diameters.push(diameterUm);
@@ -242,8 +371,19 @@ export function computeStats(
   }
 
   diameters.sort((a, b) => a - b);
+  // **Phase 2 (2026-05-05)**: boulder 가 totalAreaMm2 에 이미 포함됨 (D-value 통계).
+  // excludedAreaMm2 = clump 만 (boulder 는 통계 in, clump 는 out).
+  // totalForRatio = totalAreaMm2 (normal + boulder) + clumpAreaMm2 (clump).
+  // boulder/clump area ratio 분모 일관성: 모든 입자 합 (normal+boulder+clump).
   const { d10, d50, d90, uniformity, finesPercent, clumpAreaRatio } =
     summarize(diameters, totalAreaMm2, finesAreaMm2, clumpAreaMm2);
+  void clumpAreaRatio; // legacy summary metric — UI 는 boulder/clump 분리 사용
+
+  const totalForRatio = totalAreaMm2 + clumpAreaMm2;
+  const boulderAreaRatio =
+    totalForRatio > 0 ? (boulderAreaMm2 / totalForRatio) * 100 : 0;
+  const clumpAreaRatioFinal =
+    totalForRatio > 0 ? (clumpAreaMm2 / totalForRatio) * 100 : 0;
 
   // diagnostic: raw → 필터 breakdown → 통계 입자 수.
   // DEBUG_STATS=1 환경변수 설정 시에만 출력 (production 노이즈 방지).
@@ -263,9 +403,22 @@ export function computeStats(
         `>${MAX_PARTICLE_DIAMETER_UM}μm bg=${aboveMaxCount} | ` +
         `candidates=${candidates.length} (tempD50=${Math.round(tempD50)}μm, ` +
         `clumpThreshold=${Math.round(clumpThresholdUm)}μm) | ` +
-        `clumps=${clumpCount} (${clumpAreaRatio.toFixed(1)}% area) | ` +
+        `boulders=${boulderCount} (${boulderAreaRatio.toFixed(1)}%) | ` +
+        `clumps=${clumpCount} (${clumpAreaRatioFinal.toFixed(1)}%) | ` +
         `final=${diameters.length} particles`,
     );
+    // shape factor 분포 — boulder 임계값 튜닝용.
+    if (shapeDebug.length > 0) {
+      const cs = shapeDebug.map((x) => x.c).sort((a, b) => a - b);
+      const ss = shapeDebug.map((x) => x.s).sort((a, b) => a - b);
+      const q = (arr: number[], p: number) =>
+        arr[Math.floor(arr.length * p)] ?? 0;
+      console.log(
+        `[shape] n=${shapeDebug.length} large particles | ` +
+          `circ p25=${q(cs, 0.25).toFixed(2)} p50=${q(cs, 0.5).toFixed(2)} p75=${q(cs, 0.75).toFixed(2)} max=${cs[cs.length - 1]?.toFixed(2)} | ` +
+          `sol  p25=${q(ss, 0.25).toFixed(2)} p50=${q(ss, 0.5).toFixed(2)} p75=${q(ss, 0.75).toFixed(2)} max=${ss[ss.length - 1]?.toFixed(2)}`,
+      );
+    }
   }
 
   return {
@@ -277,10 +430,15 @@ export function computeStats(
     particleCount: diameters.length,
     totalAreaMm2,
     diameters,
+    boulders: {
+      count: boulderCount,
+      totalAreaMm2: boulderAreaMm2,
+      areaRatio: boulderAreaRatio,
+    },
     clumps: {
       count: clumpCount,
       totalAreaMm2: clumpAreaMm2,
-      areaRatio: clumpAreaRatio,
+      areaRatio: clumpAreaRatioFinal,
     },
   };
 }
@@ -319,6 +477,8 @@ export function combineStats(stats: ParticleStats[]): ParticleStats {
   let finesAreaMm2 = 0;
   let clumpCount = 0;
   let clumpAreaMm2 = 0;
+  let boulderCount = 0;
+  let boulderAreaMm2 = 0;
 
   for (const s of stats) {
     allDiameters.push(...s.diameters);
@@ -327,6 +487,8 @@ export function combineStats(stats: ParticleStats[]): ParticleStats {
     finesAreaMm2 += s.totalAreaMm2 * (s.finesPercent / 100);
     clumpCount += s.clumps.count;
     clumpAreaMm2 += s.clumps.totalAreaMm2;
+    boulderCount += s.boulders.count;
+    boulderAreaMm2 += s.boulders.totalAreaMm2;
   }
 
   if (allDiameters.length === 0) {
@@ -334,8 +496,20 @@ export function combineStats(stats: ParticleStats[]): ParticleStats {
   }
 
   allDiameters.sort((a, b) => a - b);
-  const { d10, d50, d90, uniformity, finesPercent, clumpAreaRatio } =
-    summarize(allDiameters, totalAreaMm2, finesAreaMm2, clumpAreaMm2);
+  // **Phase 2**: totalAreaMm2 에 이미 boulder area 포함 (각 shot 의 stats 에서).
+  // 분모는 normal+boulder+clump = totalAreaMm2 + clumpAreaMm2.
+  const { d10, d50, d90, uniformity, finesPercent } = summarize(
+    allDiameters,
+    totalAreaMm2,
+    finesAreaMm2,
+    clumpAreaMm2,
+  );
+
+  const totalForRatio = totalAreaMm2 + clumpAreaMm2;
+  const clumpAreaRatioFinal =
+    totalForRatio > 0 ? (clumpAreaMm2 / totalForRatio) * 100 : 0;
+  const boulderAreaRatioFinal =
+    totalForRatio > 0 ? (boulderAreaMm2 / totalForRatio) * 100 : 0;
 
   return {
     d10,
@@ -346,16 +520,24 @@ export function combineStats(stats: ParticleStats[]): ParticleStats {
     particleCount,
     totalAreaMm2,
     diameters: allDiameters,
+    boulders: {
+      count: boulderCount,
+      totalAreaMm2: boulderAreaMm2,
+      areaRatio: boulderAreaRatioFinal,
+    },
     clumps: {
       count: clumpCount,
       totalAreaMm2: clumpAreaMm2,
-      areaRatio: clumpAreaRatio,
+      areaRatio: clumpAreaRatioFinal,
     },
   };
 }
 
 /**
  * Count-based percentile with linear interpolation between adjacent values.
+ *
+ * **NOTE**: D-값 산출에는 더 이상 사용하지 않음 (2026-05-05 volume-weighted 전환).
+ * 면적 비율 (finesPercent) 같은 count-based 통계에서만 유지.
  *
  * @throws 빈 배열 입력 시
  */
@@ -369,6 +551,48 @@ export function percentile(sorted: number[], p: number): number {
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
 }
 
+/**
+ * **Volume-weighted percentile** — 산업 표준 D[v,p].
+ *
+ * 각 입자에 d³ 가중치 (구체 부피 가정) → 누적 부피 비율이 p 에 도달하는 지점의
+ * diameter. Malvern Mastersizer 의 D[v,0.5] / sieve mass-weighted D50 과 동등.
+ *
+ * 입력 sorted: 오름차순 정렬된 diameter 배열 (count-percentile 과 동일).
+ *
+ * 알고리즘:
+ *  1. 모든 d³ 합 (totalVolume)
+ *  2. target = totalVolume × p
+ *  3. 작은 입자부터 누적 합산, target 도달 시 그 입자의 diameter 반환 (선형 보간)
+ *
+ * 빈 배열 시 throw.
+ */
+export function volumeWeightedPercentile(
+  sorted: number[],
+  p: number,
+): number {
+  if (sorted.length === 0) throw new Error("volumeWeightedPercentile: 빈 배열");
+  if (sorted.length === 1) return sorted[0];
+
+  let totalVolume = 0;
+  for (const d of sorted) totalVolume += d * d * d;
+  if (totalVolume === 0) return sorted[0];
+
+  const target = totalVolume * p;
+  let cumVolume = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const w = sorted[i] ** 3;
+    if (cumVolume + w >= target) {
+      // 현재 입자 부피 안에서 선형 보간.
+      const need = target - cumVolume;
+      const frac = w > 0 ? need / w : 0;
+      const prev = i > 0 ? sorted[i - 1] : sorted[i];
+      return prev + (sorted[i] - prev) * frac;
+    }
+    cumVolume += w;
+  }
+  return sorted[sorted.length - 1];
+}
+
 export const _internal = {
   computeMinDiameter,
   FINES_THRESHOLD_UM,
@@ -376,3 +600,87 @@ export const _internal = {
   MAX_PARTICLE_DIAMETER_UM,
   CLUMP_MIN_DIAMETER_UM,
 };
+
+/**
+ * **Confidence band — 측정값 uncertainty 표기** (2026-05-05).
+ *
+ * 같은 분쇄도 14장 batch (regression test) 에서 nominal 7장 (clump/far outlier 제외):
+ *   D10 std ≈ 25µm, D50 std ≈ 50µm, D90 std ≈ 130µm.
+ *
+ * 사용자가 절대값 맹신하지 않게 "±X µm" 표기. multi-shot averaging 시 √n 감소.
+ *
+ * 보수적 base 선택: D50 50 (nominal 7장 std 20 보다 크게 → outlier 영향 일부 반영).
+ * D90/D10 은 sub-pixel 한계 영역으로 상대 분산 더 큼 (실측 D90 std 126).
+ */
+const SINGLE_SHOT_STD_D10 = 25;
+const SINGLE_SHOT_STD_D50 = 50;
+const SINGLE_SHOT_STD_D90 = 130;
+
+export interface ConfidenceBand {
+  d10Pm: number;
+  d50Pm: number;
+  d90Pm: number;
+}
+
+/**
+ * **균일도 ratio (D90/D10) → 사용자 친화 percentage** (2026-05-05).
+ *
+ * 사용자 피드백: "2.51 같은 ratio 는 이해하기 어렵다, % 로 표기".
+ *
+ * 매핑 (피스와이즈 선형, 커피 분쇄 영역에 맞춤):
+ *   ratio 1.0 → 100% (완벽 균일)
+ *   ratio 2.5 → 78%  (excellent — 좋은 burr)
+ *   ratio 4.0 → 55%  (good — 평범)
+ *   ratio 5.5 → 33%  (uneven)
+ *   ratio 7.0 → 10%  (poor)
+ *   ratio 8+ → 0%
+ *
+ * 공식: `max(0, min(100, 100 - (ratio - 1) × 15))`. 직관적 "높을수록 좋음" scale.
+ */
+export function uniformityToPercent(uniformityRatio: number): number {
+  if (!Number.isFinite(uniformityRatio) || uniformityRatio <= 1) return 100;
+  const pct = 100 - (uniformityRatio - 1) * 15;
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+/**
+ * **균일도 % → 영문 등급** (2026-05-05).
+ *
+ *   pct ≥ 78  → Excellent  (ratio ≤ 2.5)
+ *   pct ≥ 55  → Good       (ratio ≤ 4.0)
+ *   pct ≥ 33  → Fair       (ratio ≤ 5.5)
+ *   pct ≥ 10  → Poor       (ratio ≤ 7.0)
+ *   pct <  10 → Very Poor  (ratio > 7.0)
+ */
+export type UniformityLabel =
+  | "Excellent"
+  | "Good"
+  | "Fair"
+  | "Poor"
+  | "Very Poor";
+
+export function uniformityLabel(uniformityPct: number): UniformityLabel {
+  if (uniformityPct >= 78) return "Excellent";
+  if (uniformityPct >= 55) return "Good";
+  if (uniformityPct >= 33) return "Fair";
+  if (uniformityPct >= 10) return "Poor";
+  return "Very Poor";
+}
+
+/**
+ * shotCount 기반 confidence band 계산.
+ *
+ * - shotCount=1 : single-shot std 그대로 반환
+ * - shotCount=N : std / √N (averaging variance reduction)
+ *
+ * 1-sigma band — 사용자 표기는 "±N µm". 정밀 통계 신뢰구간 아닌 휴리스틱 안내값.
+ */
+export function computeConfidenceBand(shotCount: number): ConfidenceBand {
+  const n = Math.max(1, shotCount);
+  const factor = 1 / Math.sqrt(n);
+  return {
+    d10Pm: Math.round(SINGLE_SHOT_STD_D10 * factor),
+    d50Pm: Math.round(SINGLE_SHOT_STD_D50 * factor),
+    d90Pm: Math.round(SINGLE_SHOT_STD_D90 * factor),
+  };
+}

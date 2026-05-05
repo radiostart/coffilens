@@ -12,6 +12,11 @@ import { ConfirmModal } from "../components/confirm-modal";
 import { useMeasurementStore } from "../stores/measurement.store";
 import { useHistoryStore } from "../stores/history.store";
 import { errorDetails, rejectReasonLabel } from "../opencv/errors";
+import {
+  computeConfidenceBand,
+  uniformityLabel,
+  uniformityToPercent,
+} from "../opencv/statistics";
 import { makeThumbnail } from "../lib/thumbnail";
 import { buildBrewingGuide } from "../lib/brewing-guide";
 import "./result.css";
@@ -39,6 +44,7 @@ export function ResultRoute() {
   const archive = useMeasurementStore((s) => s.archive);
   const setArchive = useMeasurementStore((s) => s.setArchive);
   const accumulatedStats = useMeasurementStore((s) => s.accumulatedStats);
+  const setError = useMeasurementStore((s) => s.setError);
   const setAppendMode = useMeasurementStore((s) => s.setAppendMode);
   const resetAccumulated = useMeasurementStore((s) => s.resetAccumulated);
   const saveHistory = useHistoryStore((s) => s.save);
@@ -64,6 +70,14 @@ export function ResultRoute() {
   // result 화면을 떠날 때마다 누적/append 상태를 비운다 — 다음 사이클은 fresh.
   function leaveResult(path: string) {
     resetAccumulated();
+    setLocation(path);
+  }
+
+  // **에러 retry — 누적 유지** (2026-05-05 fix).
+  // "한 번 더 측정" 시도 중 동전 인식 실패 등으로 에러 → "다시 촬영하기" 클릭 시
+  // 이전 누적 stats 가 사라지지 않게. 사용자가 fresh 재시작하려면 "홈으로" 사용.
+  function retryAfterError(path: string) {
+    setError(null); // 에러만 비우고 accumulatedStats / appendMode 는 유지
     setLocation(path);
   }
 
@@ -135,10 +149,19 @@ export function ResultRoute() {
           <button
             type="button"
             className="btn-primary"
-            onClick={() => leaveResult("/camera")}
+            onClick={() => retryAfterError("/camera")}
           >
-            다시 촬영하기
+            {accumulatedStats.length > 0 ? "다시 촬영 (누적 유지)" : "다시 촬영하기"}
           </button>
+          {accumulatedStats.length > 0 && (
+            <button
+              type="button"
+              className="result-secondary"
+              onClick={() => leaveResult("/camera")}
+            >
+              처음부터 새 측정 (누적 비움)
+            </button>
+          )}
           <button
             type="button"
             className="result-secondary"
@@ -186,6 +209,15 @@ export function ResultRoute() {
       `검출된 입자가 적어요(${result.stats.particleCount}개). 통계 신뢰도가 낮을 수 있습니다.`,
     );
   }
+  // **Far-shot warning (2026-05-05)**: regression n=14 에서 mmPerPx > 0.15 사진은
+  // sub-pixel 한계로 fines% 약 40% underestimate (8% vs close-up 12-17%) +
+  // D50 +50µm shift up. computeMinDiameter 가 100µm 에 cap 되어 미세 입자 손실.
+  // far shot 자동 감지 → 사용자에게 close-up 권장.
+  if (result.coin.mmPerPixel > 0.15) {
+    warnings.push(
+      "🔍 멀리 찍어서 미세 입자가 일부 누락됐을 수 있어요. 동전이 화면 1/3 이상 차게 더 가까이 찍으면 정확도가 올라가요.",
+    );
+  }
 
   async function handleSave() {
     if (!result) return;
@@ -208,6 +240,9 @@ export function ResultRoute() {
         clumpsCount: result.stats.clumps.count,
         clumpsAreaRatio: result.stats.clumps.areaRatio,
         clumpsTotalAreaMm2: result.stats.clumps.totalAreaMm2,
+        bouldersCount: result.stats.boulders.count,
+        bouldersAreaRatio: result.stats.boulders.areaRatio,
+        bouldersTotalAreaMm2: result.stats.boulders.totalAreaMm2,
         totalAreaMm2: result.stats.totalAreaMm2,
         particleCount: result.stats.particleCount,
         durationMs: result.durationMs,
@@ -229,6 +264,10 @@ export function ResultRoute() {
     mmPerPixel: result.coin.mmPerPixel,
   });
 
+  // 측정 정밀도 안내 — shotCount 기반 √n 감소 적용.
+  // single shot D50 ±50µm, 3 shot ≈ ±29µm, 5 shot ≈ ±22µm.
+  const band = computeConfidenceBand(shotCount);
+
   return (
     <>
       <NavBar title="분석 결과" />
@@ -237,6 +276,9 @@ export function ResultRoute() {
         <header className="result-headline">
           <h1 className="text-display result-diagnosis">
             분쇄도 {Math.round(result.stats.d50)}μm
+            <span className="result-diagnosis-band" aria-label={`측정 정밀도 ±${band.d50Pm}µm`}>
+              ±{band.d50Pm}μm
+            </span>
           </h1>
           {/* archive view (저장된 record) 는 단일 stats 로 저장됐으므로 배지 X. */}
           {shotCount > 1 && (
@@ -287,6 +329,7 @@ export function ResultRoute() {
             </dt>
             <dd className="text-h4 numeric">
               {Math.round(result.stats.d10)}μm
+              <span className="result-band-below">±{band.d10Pm}μm</span>
             </dd>
           </div>
           <span className="result-data-sep" aria-hidden="true">
@@ -301,6 +344,7 @@ export function ResultRoute() {
             </dt>
             <dd className="text-h4 numeric">
               {Math.round(result.stats.d50)}μm
+              <span className="result-band-below">±{band.d50Pm}μm</span>
             </dd>
           </div>
           <span className="result-data-sep" aria-hidden="true">
@@ -315,6 +359,7 @@ export function ResultRoute() {
             </dt>
             <dd className="text-h4 numeric">
               {Math.round(result.stats.d90)}μm
+              <span className="result-band-below">±{band.d90Pm}μm</span>
             </dd>
           </div>
           <span className="result-data-sep" aria-hidden="true">
@@ -323,12 +368,16 @@ export function ResultRoute() {
           <div>
             <dt
               className="text-caption"
-              title="입자 크기 균일성 (작을수록 고름, D90/D10 비율)"
+              title={`입자 크기가 얼마나 고른가. D90/D10 비율 (낮을수록 균일).
+Excellent ≤ 2.5 · Good ≤ 4.0 · Fair ≤ 5.5 · Poor ≤ 7.0 · Very Poor > 7.0`}
             >
               균일도
             </dt>
             <dd className="text-h4 numeric">
               {result.stats.uniformity.toFixed(2)}
+              <span className="result-uniformity-grade">
+                {uniformityLabel(uniformityToPercent(result.stats.uniformity))}
+              </span>
             </dd>
           </div>
           <span className="result-data-sep" aria-hidden="true">
@@ -386,11 +435,33 @@ export function ResultRoute() {
               ⚠️ {guide.caveat}
             </p>
           )}
-          {result.stats.clumps.count > 0 && (
+          {(result.stats.boulders.count > 0 ||
+            result.stats.clumps.count > 0) && (
             <p className="text-caption result-clumps-meta">
-              🔸 클럼프 {result.stats.clumps.count}개 (
-              {result.stats.clumps.totalAreaMm2.toFixed(0)}mm²,{" "}
-              {result.stats.clumps.areaRatio.toFixed(1)}%) 통계에서 제외됨
+              🔸 큰 입자 분리 (통계 제외):{" "}
+              {result.stats.boulders.count > 0 && (
+                <>
+                  Boulder {result.stats.boulders.count}개 (
+                  {result.stats.boulders.areaRatio.toFixed(1)}%)
+                </>
+              )}
+              {result.stats.boulders.count > 0 &&
+                result.stats.clumps.count > 0 &&
+                " · "}
+              {result.stats.clumps.count > 0 && (
+                <>
+                  Clump {result.stats.clumps.count}개 (
+                  {result.stats.clumps.areaRatio.toFixed(1)}%)
+                </>
+              )}
+              <br />
+              <span className="result-clumps-hint">
+                {result.stats.boulders.count > result.stats.clumps.count
+                  ? "Boulder 다수 — 그라인더 burr 점검 또는 setting 조정 권장"
+                  : result.stats.clumps.count > 0
+                    ? "Clump 다수 — RDT(분무) 또는 retention 점검 권장"
+                    : ""}
+              </span>
             </p>
           )}
         </section>
@@ -463,12 +534,22 @@ export function ResultRoute() {
               측정 저장
             </button>
             {/* "한 번 더 측정" — 같은 분쇄도 confirm 후 appendMode=true 로 /camera. */}
+            {shotCount === 1 && (
+              <p className="result-multishot-callout text-caption">
+                💡 단일 측정 정밀도 ±{band.d50Pm}μm. 3장 평균 → ±
+                {computeConfidenceBand(3).d50Pm}μm, 5장 평균 → ±
+                {computeConfidenceBand(5).d50Pm}μm 까지 좁혀져요.
+              </p>
+            )}
             <button
               type="button"
               className="result-retake-cta"
               onClick={() => setShowRetakeConfirm(true)}
             >
-              ✨ 한 번 더 측정 (정확도 ↑)
+              ✨ 한 번 더 측정{" "}
+              <span className="result-retake-cta-sub">
+                (±{band.d50Pm} → ±{computeConfidenceBand(shotCount + 1).d50Pm}μm)
+              </span>
             </button>
             <button
               type="button"
