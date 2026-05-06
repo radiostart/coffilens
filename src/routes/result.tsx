@@ -10,6 +10,7 @@ import { DisclaimerBanner } from "../components/disclaimer-banner";
 import { AdBanner } from "../components/ad-banner";
 import { ConfirmModal } from "../components/confirm-modal";
 import { DebugOverlay } from "../components/debug-overlay";
+import { SpectrumBar } from "../components/spectrum-bar";
 import { useMeasurementStore } from "../stores/measurement.store";
 import { useHistoryStore } from "../stores/history.store";
 import { errorDetails, rejectReasonLabel } from "../opencv/errors";
@@ -447,16 +448,11 @@ Excellent ≤ 2.5 · Good ≤ 4.0 · Fair ≤ 5.5 · Poor ≤ 7.0 · Very Poor >
             ☕ 어떻게 추출할까요?{" "}
             <span className="result-grind-label">{guide.grindLabel}</span>
           </h2>
+          <SpectrumBar d50={result.stats.d50} />
           <div className="result-guide-row">
             <span className="result-guide-tag tag-primary">추천</span>
             <span className="text-body">{guide.primary.join(" · ")}</span>
           </div>
-          {guide.secondary.length > 0 && (
-            <div className="result-guide-row">
-              <span className="result-guide-tag tag-secondary">차선</span>
-              <span className="text-body">{guide.secondary.join(" · ")}</span>
-            </div>
-          )}
           {guide.avoid.length > 0 && (
             <div className="result-guide-row">
               <span className="result-guide-tag tag-avoid">비추</span>

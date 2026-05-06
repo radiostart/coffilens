@@ -449,11 +449,6 @@
   color: var(--color-text-on-primary);
 }
 
-.tag-secondary {
-  background: var(--color-primary-subtle);
-  color: var(--color-primary);
-}
-
 .tag-avoid {
   background: var(--color-warning-bg);
   color: var(--color-warning);

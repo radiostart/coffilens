@@ -16,8 +16,9 @@
  *  2) 중간 (500~900μm sieve) — 핸드드립 (V60·Kalita·Origami·Chemex 통칭)
  *  3) 거침 (>900μm sieve)   — 프렌치프레스 / 콜드브루
  *
- * 카테고리 내에서 brewing 추천은 4-도구 모두 노출 (primary/secondary/avoid 분기).
+ * 카테고리 내에서 brewing 추천은 primary + avoid 로 분기.
  * 사용자가 익숙한 "추출 방식" 단위 표현은 유지하되, 카테고리 라벨만 단순화.
+ * "차선" 은 SpectrumBar UI 가 분쇄도 spectrum 위 위치 정보로 대체 (2026-05-06 결정).
  *
  * **D50 임계값 — 표준 sieve 기준**
  *
@@ -48,8 +49,6 @@ export interface BrewingGuide {
   grindLabel: "미세" | "중간" | "거침";
   /** 가장 적합한 추출법 (1~2개) */
   primary: string[];
-  /** 차선 추출법 (조건부, 가능) */
-  secondary: string[];
   /** 비추천 추출법 + 이유 */
   avoid: string[];
   /** 측정 신뢰도 라벨 ("high" | "medium" | "low") */
@@ -118,24 +117,22 @@ export function buildBrewingGuide(input: {
   const measurementConfidence = classifyMeasurementConfidence(input.mmPerPixel);
 
   let primary: string[] = [];
-  let secondary: string[] = [];
   let avoid: string[] = [];
 
-  // 3-카테고리 brewing 추천. 카테고리 내에서 4-도구 모두 표현 (primary/secondary).
+  // 3-카테고리 brewing 추천. 차선 (secondary) 은 spectrum bar UI 가 위치 정보로
+  // 대체 — 사용자가 분쇄도 spectrum 위 자기 위치를 보고 인접 카테고리 가능성을
+  // 직접 인지 (2026-05-06 변경, plan-ceo-review 결정).
   switch (grindClass) {
     case "fine":
       primary = ["에스프레소", "모카포트"];
-      secondary = [];
       avoid = ["핸드드립 (추출 너무 느림, 과추출)", "프렌치프레스 (미분 슬러지)"];
       break;
     case "medium":
       primary = ["핸드드립"];
-      secondary = ["모카포트 (조금 곱게)", "프렌치프레스 (조금 굵게)"];
       avoid = ["에스프레소 (너무 굵음, 채널링)"];
       break;
     case "coarse":
       primary = ["프렌치프레스", "콜드브루"];
-      secondary = ["핸드드립 (조금 곱게 조정 권장)"];
       avoid = ["에스프레소 (추출 너무 빠름)", "모카포트"];
       break;
   }
@@ -194,7 +191,6 @@ export function buildBrewingGuide(input: {
   return {
     grindLabel: GRIND_LABELS[grindClass],
     primary,
-    secondary,
     avoid,
     measurementConfidence,
     caveat: caveats.length > 0 ? caveats.join(" ") : undefined,
