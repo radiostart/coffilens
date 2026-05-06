@@ -45,7 +45,8 @@ declare const cv: {
     blockSize: number,
     C: number,
   ) => void;
-  bitwise_and: (a: CvMat, b: CvMat, dst: CvMat, mask: CvMat) => void;
+  bitwise_and: (a: CvMat, b: CvMat, dst: CvMat, mask?: CvMat) => void;
+  split: (src: CvMat, channels: CvMatVector) => void;
   morphologyEx: (src: CvMat, dst: CvMat, op: number, kernel: CvMat) => void;
   distanceTransform: (
     src: CvMat,
@@ -96,6 +97,7 @@ declare const cv: {
   ) => CvCLAHE;
   COLOR_RGBA2GRAY: number;
   COLOR_RGBA2RGB: number;
+  COLOR_RGB2HSV: number;
   CV_8U: number;
   CV_32S: number;
   ADAPTIVE_THRESH_GAUSSIAN_C: number;
@@ -171,6 +173,25 @@ const SANITY_MAX_SINGLE_RATIO = 0.5;
 // 동전 마스킹은 동전만 가리고 napkin 밖 wood floor 는 여전히 검출 → 필터 필요.
 const MAX_PARTICLE_AREA_MM2 = 80;
 
+// HSV S 채널 임계 — 이 값 이상의 saturation 만 "채색 픽셀(=커피)" 로 간주.
+// 그림자/종이 텍스처는 무채색 (S 0~15) → 임계 미달로 제외.
+// 커피 입자는 갈색 → S 보통 50+ → 임계 통과.
+//
+// 도입 배경 (2026-05-06): grayscale adaptive threshold 단독은 입자 + 그림자 +
+// 종이 텍스처 noise 를 한 데 묶어 잡아 (a) 입자 contour 가 그림자 포함 → centroid
+// 우측 하단으로 어긋나고 radius 부풀림 (b) sparse 사진에서 종이 텍스처 spot 이
+// fines 로 잘못 카운트. saturation 채널과 AND 결합해 두 문제 동시 해결.
+//
+// 진단 데이터 (scripts/diagnose-shadow.ts):
+//   - sparse 사진 (001/003): unmatched gray-only contour 23%, p50 area 3px²,
+//     equivalent diameter ~190µm — 진짜 fines 라기엔 너무 작아 종이 노이즈 가설.
+//   - dense 사진 (014/vs3-09): unmatched 1% — 노이즈 자체가 적어 영향 적음.
+//   - median area ratio 0.62~0.80: 그림자 contour 기여분 직접 측정.
+//
+// 25 = 종이/그림자 ceiling(15~20) 위, 약한 조명/엷은 입자의 saturation 하한 (~30~40)
+// 아래로 안전 margin. fixture 회귀 후 튜닝 가능.
+const SAT_MIN_THRESHOLD = 25;
+
 export interface ParticleSegmentation {
   contours: CvMatVector;
   hierarchy: CvMat;
@@ -239,9 +260,28 @@ export async function segmentParticles(
         ADAPT_C,
       );
 
+      // 2a. Saturation 채널 binary — 그림자 + 종이 텍스처 noise 제거용.
+      // RGBA → RGB → HSV → S 채널 추출 → 단순 임계 (S > SAT_MIN_THRESHOLD = 25).
+      // 커피(brown) 만 통과, napkin/그림자(무채색) 는 제외.
+      const rgb = scope.track(new cv.Mat());
+      cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
+      const hsv = scope.track(new cv.Mat());
+      cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
+      const channels = scope.track(new cv.MatVector());
+      cv.split(hsv, channels);
+      const sat = scope.track(channels.get(1));
+      const satBin = scope.track(new cv.Mat());
+      cv.threshold(sat, satBin, SAT_MIN_THRESHOLD, 255, cv.THRESH_BINARY);
+
+      // 2b. gray binary AND sat binary — 두 채널 모두에서 입자로 판단된 픽셀만.
+      // 효과: gray 만 잡힌 그림자/종이 노이즈 contour 제거, 실제 입자(둘 다 통과)
+      // 는 보존하면서 contour 가장자리의 그림자 부분만 trim 됨.
+      const grayAndSat = scope.track(new cv.Mat());
+      cv.bitwise_and(binary, satBin, grayAndSat);
+
       // 동전 영역 mask out
       const masked = scope.track(new cv.Mat());
-      cv.bitwise_and(binary, binary, masked, coinMask);
+      cv.bitwise_and(grayAndSat, grayAndSat, masked, coinMask);
 
       // 3. Morphological opening — fine grind 는 skip (1-2px 미분 erode 방지).
       // tuned 2026-05-02 — medium grind 에서 OPEN 활성화하면 D50 약간 ↑ (19%) 이지만

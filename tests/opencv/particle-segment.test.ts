@@ -76,6 +76,7 @@ function setupCvMock(opts: CvMockOpts = {}) {
     threshold: vi.fn(),
     connectedComponents: vi.fn(() => 2),
     watershed: vi.fn(),
+    split: vi.fn(),
     findContours: vi.fn(),
     contourArea: vi.fn(() => {
       const a = contourAreas[areaIdx % Math.max(1, contourAreas.length)];
@@ -111,6 +112,7 @@ function setupCvMock(opts: CvMockOpts = {}) {
     }),
     COLOR_RGBA2GRAY: 0,
     COLOR_RGBA2RGB: 0,
+    COLOR_RGB2HSV: 0,
     CV_8U: 0,
     CV_32S: 0,
     ADAPTIVE_THRESH_GAUSSIAN_C: 0,
