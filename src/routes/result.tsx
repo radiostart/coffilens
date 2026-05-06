@@ -456,32 +456,13 @@ Excellent ≤ 2.5 · Good ≤ 4.0 · Fair ≤ 5.5 · Poor ≤ 7.0 · Very Poor >
               ⚠️ {guide.caveat}
             </p>
           )}
-          {(result.stats.boulders.count > 0 ||
-            result.stats.clumps.count > 0) && (
+          {result.stats.clumps.count > 0 && (
             <p className="text-caption result-clumps-meta">
-              🔸 큰 입자 분리 (통계 제외):{" "}
-              {result.stats.boulders.count > 0 && (
-                <>
-                  Boulder {result.stats.boulders.count}개 (
-                  {result.stats.boulders.areaRatio.toFixed(1)}%)
-                </>
-              )}
-              {result.stats.boulders.count > 0 &&
-                result.stats.clumps.count > 0 &&
-                " · "}
-              {result.stats.clumps.count > 0 && (
-                <>
-                  Clump {result.stats.clumps.count}개 (
-                  {result.stats.clumps.areaRatio.toFixed(1)}%)
-                </>
-              )}
+              🔸 응집체 {result.stats.clumps.count}개 (
+              {result.stats.clumps.areaRatio.toFixed(1)}%, 통계 제외)
               <br />
               <span className="result-clumps-hint">
-                {result.stats.boulders.count > result.stats.clumps.count
-                  ? "Boulder 다수 — 그라인더 burr 점검 또는 setting 조정 권장"
-                  : result.stats.clumps.count > 0
-                    ? "Clump 다수 — RDT(분무) 또는 retention 점검 권장"
-                    : ""}
+                응집체 비율 높음 — RDT(분무) 또는 그라인더 retention 점검 권장
               </span>
             </p>
           )}
