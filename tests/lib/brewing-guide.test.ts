@@ -66,7 +66,6 @@ describe("buildBrewingGuide — Setting 11 (primary anchor)", () => {
       clumpAreaRatio: 0.0,
       mmPerPixel: 0.045,
     });
-    expect(guide.grindLabel).toBe("중간");
     expect(guide.measurementConfidence).toBe("high");
     expect(guide.primary).toEqual(["핸드드립"]);
     // high confidence + 0 clump + uniformity excellent → caveat 없음
@@ -84,7 +83,6 @@ describe("buildBrewingGuide — coarse grind + medium confidence (5.1 시나리�
       clumpAreaRatio: 15.6,
       mmPerPixel: 0.068,
     });
-    expect(guide.grindLabel).toBe("거침");
     expect(guide.measurementConfidence).toBe("medium");
     expect(guide.primary).toEqual(["프렌치프레스", "콜드브루"]);
     // coarse + 균일도/clump 임계 미달 → caveat 없음
@@ -101,7 +99,7 @@ describe("buildBrewingGuide — fine grind 영역 (espresso 경고)", () => {
       clumpAreaRatio: 5.0,
       mmPerPixel: 0.045, // high confidence
     });
-    expect(guide.grindLabel).toBe("미세");
+    expect(guide.primary).toEqual(["에스프레소", "모카포트"]);
     expect(guide.caveat).toBeDefined();
     expect(guide.caveat).toContain("핸드드립");
   });
@@ -115,9 +113,8 @@ describe("buildBrewingGuide — fine 카테고리 (espresso/moka)", () => {
       clumpAreaRatio: 5.0,
       mmPerPixel: 0.045,
     });
-    expect(guide.grindLabel).toBe("미세");
     expect(guide.primary).toEqual(["에스프레소", "모카포트"]);
-    expect(guide.avoid.length).toBeGreaterThan(0);
+    expect(guide.measurementConfidence).toBe("high");
   });
 });
 
@@ -129,7 +126,6 @@ describe("buildBrewingGuide — coarse 카테고리 (french press)", () => {
       clumpAreaRatio: 0.0,
       mmPerPixel: 0.06,
     });
-    expect(guide.grindLabel).toBe("거침");
     expect(guide.primary).toEqual(["프렌치프레스", "콜드브루"]);
     expect(guide.measurementConfidence).toBe("medium");
   });

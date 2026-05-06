@@ -45,12 +45,8 @@
  */
 
 export interface BrewingGuide {
-  /** 3-카테고리 분류 라벨 ("미세" | "중간" | "거침") */
-  grindLabel: "미세" | "중간" | "거침";
-  /** 가장 적합한 추출법 (1~2개) */
+  /** 가장 적합한 추출법 (1~2개) — 결과 화면 title 의 badge 로 표시 */
   primary: string[];
-  /** 비추천 추출법 + 이유 */
-  avoid: string[];
   /** 측정 신뢰도 라벨 ("high" | "medium" | "low") */
   measurementConfidence: "high" | "medium" | "low";
   /** 분쇄 품질 / 측정 신뢰도 관련 caveat (있을 때만) */
@@ -100,12 +96,6 @@ function classifyMeasurementConfidence(
   return "low";
 }
 
-const GRIND_LABELS = {
-  fine: "미세",
-  medium: "중간",
-  coarse: "거침",
-} as const;
-
 export function buildBrewingGuide(input: {
   d50: number;
   uniformity: number;
@@ -117,23 +107,18 @@ export function buildBrewingGuide(input: {
   const measurementConfidence = classifyMeasurementConfidence(input.mmPerPixel);
 
   let primary: string[] = [];
-  let avoid: string[] = [];
 
-  // 3-카테고리 brewing 추천. 차선 (secondary) 은 spectrum bar UI 가 위치 정보로
-  // 대체 — 사용자가 분쇄도 spectrum 위 자기 위치를 보고 인접 카테고리 가능성을
-  // 직접 인지 (2026-05-06 변경, plan-ceo-review 결정).
+  // 3-카테고리 → primary 추천만. 차선 / 비추는 spectrum bar UI 가 위치 정보로
+  // 시각적으로 표현 (2026-05-06, plan-ceo-review 결정).
   switch (grindClass) {
     case "fine":
       primary = ["에스프레소", "모카포트"];
-      avoid = ["핸드드립 (추출 너무 느림, 과추출)", "프렌치프레스 (미분 슬러지)"];
       break;
     case "medium":
       primary = ["핸드드립"];
-      avoid = ["에스프레소 (너무 굵음, 채널링)"];
       break;
     case "coarse":
       primary = ["프렌치프레스", "콜드브루"];
-      avoid = ["에스프레소 (추출 너무 빠름)", "모카포트"];
       break;
   }
 
@@ -189,9 +174,7 @@ export function buildBrewingGuide(input: {
   }
 
   return {
-    grindLabel: GRIND_LABELS[grindClass],
     primary,
-    avoid,
     measurementConfidence,
     caveat: caveats.length > 0 ? caveats.join(" ") : undefined,
   };

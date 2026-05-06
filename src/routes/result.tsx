@@ -446,21 +446,11 @@ Excellent ≤ 2.5 · Good ≤ 4.0 · Fair ≤ 5.5 · Poor ≤ 7.0 · Very Poor >
         <section className="result-brewing-guide" aria-label="추출 가이드">
           <h2 className="text-h3 result-section-title">
             ☕ 어떻게 추출할까요?{" "}
-            <span className="result-grind-label">{guide.grindLabel}</span>
+            <span className="result-grind-label">
+              {guide.primary.join(" · ")}
+            </span>
           </h2>
           <SpectrumBar d50={result.stats.d50} />
-          <div className="result-guide-row">
-            <span className="result-guide-tag tag-primary">추천</span>
-            <span className="text-body">{guide.primary.join(" · ")}</span>
-          </div>
-          {guide.avoid.length > 0 && (
-            <div className="result-guide-row">
-              <span className="result-guide-tag tag-avoid">비추</span>
-              <span className="text-body result-guide-avoid">
-                {guide.avoid.join(" · ")}
-              </span>
-            </div>
-          )}
           {guide.caveat && (
             <p className="text-caption result-guide-caveat">
               ⚠️ {guide.caveat}

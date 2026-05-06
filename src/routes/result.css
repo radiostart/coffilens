@@ -429,35 +429,6 @@
   vertical-align: middle;
 }
 
-.result-guide-row {
-  display: flex;
-  gap: var(--space-sm);
-  align-items: baseline;
-}
-
-.result-guide-tag {
-  flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 2px var(--space-sm);
-  border-radius: var(--radius-sm);
-  letter-spacing: -0.02em;
-}
-
-.tag-primary {
-  background: var(--color-primary);
-  color: var(--color-text-on-primary);
-}
-
-.tag-avoid {
-  background: var(--color-warning-bg);
-  color: var(--color-warning);
-}
-
-.result-guide-avoid {
-  color: var(--color-text-secondary);
-}
-
 .result-guide-caveat {
   background: var(--color-warning-bg);
   color: var(--color-warning);
