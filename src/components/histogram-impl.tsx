@@ -85,6 +85,18 @@ interface AnnotatedBin extends HistogramBin {
 // 200µm 미만은 sub-pixel noise — main bin 에서 빼고 fines outlier 로 collapse.
 // computeStats 의 FINES_THRESHOLD 와 별개 (binning 표시용).
 const MIN_DISPLAY_DIAMETER_UM = 200;
+
+// **Fines sub-bin 분할** (2026-05-06 추가):
+// 기존: lowerBound 미만 입자 전부를 단일 outlier bin 으로 collapse → 95~329µm
+//       처럼 wide bin 으로 나타나 (a) fines% 시각 검증 불가, (b) bimodal 분포
+//       (미분 peak + main peak) 진단 불가, (c) sub-pixel artifact 와 진짜 미분
+//       구분 불가.
+// 개선: dense bin 과 동일 log-width 로 fines 영역도 sub-bin 분할.
+// 적응형 갯수 (data 의 actualMin 에 따라 1~3개), bin 폭 dense 와 일치 → 시각 일관성.
+const FINES_SUB_BIN_MAX = 3;
+// Fines sub-bin 표시 하한 (µm). 그 미만 입자는 sub-pixel artifact 영역이라
+// 별도 bar 안 그리고 leftmost sub-bin 에 묶음. X 축 stretch 방지.
+const FINES_DISPLAY_FLOOR_UM = 200;
 // outlier bin 이 Y 차지해 mid bars 압축되는 문제 방지 — P75 × 1.5 까지만 표시.
 const Y_AXIS_PERCENTILE = 0.75;
 const Y_AXIS_DOMAIN_MULTIPLIER = 1.5;
@@ -254,13 +266,20 @@ export default function HistogramImpl({
         if (pct > linePctCap) linePctCap = pct;
       }
 
-      // 시작/끝 anchor — outlier 또는 첫/마지막 dense bin, percentage 변환
-      const finesIdx = annotated.findIndex((b) => b.outlier === "fines");
-      if (finesIdx >= 0) {
-        annotated[finesIdx].lineY =
-          (annotated[finesIdx].weight / totalWeight) * 100;
-        annotated[finesIdx].anchorLabel = "시작";
-      } else {
+      // 시작 anchor — fines sub-bin 이 multiple 이면 각각 lineY 할당 (line 연속성),
+      // 가장 왼쪽 (smallest) sub-bin 만 "시작" label.
+      let firstFinesAssigned = false;
+      for (let i = 0; i < annotated.length; i++) {
+        if (annotated[i].outlier === "fines") {
+          annotated[i].lineY = (annotated[i].weight / totalWeight) * 100;
+          if (!firstFinesAssigned) {
+            annotated[i].anchorLabel = "시작";
+            firstFinesAssigned = true;
+          }
+          if (annotated[i].lineY > linePctCap) linePctCap = annotated[i].lineY;
+        }
+      }
+      if (!firstFinesAssigned) {
         const firstIdx = annotated.findIndex((b) => !b.outlier);
         if (firstIdx >= 0 && annotated[firstIdx].lineY === undefined) {
           annotated[firstIdx].lineY =
@@ -581,20 +600,67 @@ function buildBins(diameters: number[], bins: number): HistogramBin[] {
   const result: HistogramBin[] = [];
 
   const finesParticles = sorted.filter((d) => d < lowerBound);
-  const finesCount = finesParticles.length;
-  if (finesCount > 0) {
-    const finesWeight = finesParticles.reduce((s, d) => s + d * d * d, 0);
-    const finesPos = Math.pow(10, logMin - logBinWidth);
-    result.push({
-      range: Math.round(finesPos),
-      rangeMax: Math.round(lowerBound),
-      count: finesCount,
-      weight: finesWeight,
-      percentage: (finesWeight / totalVolume) * 100,
-      outlier: "fines",
-      actualMin: Math.round(sorted[0]),
-      actualMax: Math.round(lowerBound),
-    });
+  if (finesParticles.length > 0) {
+    // Fines 영역을 균등 log-width 로 sub-bin 분할.
+    //
+    // 표시 floor (FINES_DISPLAY_FLOOR_UM = 200): 그 미만 입자는 sub-pixel artifact
+    // 영역 (1-2px particle 의 quantization 한계) 이라 별도 bar 안 그림. 통계
+    // (fines%, totalArea) 에는 여전히 포함. actualMin 이 floor 미만이면 leftmost
+    // sub-bin 이 floor 부터 시작해 X 축 stretch 방지.
+    //
+    // sub-bin 갯수: actualMin (또는 floor) ~ lowerBound 사이를 dense logBinWidth
+    // 단위로 몇 개 들어가나 (max 3 cap). 균등 log-width 분할.
+    const finesActualMin = sorted[0];
+    const finesDisplayMin = Math.max(finesActualMin, FINES_DISPLAY_FLOOR_UM);
+    // floor 이상에 입자가 없으면 sub-bin 스킵 (모두 sub-pixel zone)
+    if (finesDisplayMin < lowerBound) {
+      const logFinesMin = Math.log10(finesDisplayMin);
+      const subBinCount = Math.max(
+        1,
+        Math.min(
+          FINES_SUB_BIN_MAX,
+          Math.ceil((logMin - logFinesMin) / logBinWidth),
+        ),
+      );
+      const finesLogWidth = (logMin - logFinesMin) / subBinCount;
+      // sub-bin left-to-right 순서. level=subBinCount 가 가장 왼쪽 (smallest).
+      // 가장 왼쪽 sub-bin 은 floor 미만 입자도 포함 (시각적으로 floor 부터 시작하지만
+      // 통계상 actualMin 까지 cover) — sub-pixel artifact 가 묻혀 표시되지 않게.
+      for (let level = subBinCount; level >= 1; level--) {
+        const isLeftmost = level === subBinCount;
+        const lo = Math.pow(10, logFinesMin + (subBinCount - level) * finesLogWidth);
+        const hi = Math.pow(10, logFinesMin + (subBinCount - level + 1) * finesLogWidth);
+        // leftmost sub-bin 만 floor 미만 입자도 포함
+        const inBin = finesParticles.filter((d) =>
+          isLeftmost ? d < hi : d >= lo && d < hi,
+        );
+        if (inBin.length === 0) continue;
+        const weight = inBin.reduce((s, d) => s + d * d * d, 0);
+        result.push({
+          range: Math.round(lo),
+          rangeMax: Math.round(hi),
+          count: inBin.length,
+          weight,
+          percentage: (weight / totalVolume) * 100,
+          outlier: "fines",
+          actualMin: Math.round(Math.min(...inBin)),
+          actualMax: Math.round(Math.max(...inBin)),
+        });
+      }
+    } else {
+      // 모든 fines 입자가 floor 미만 — 단일 압축 bin 으로 표시
+      const weight = finesParticles.reduce((s, d) => s + d * d * d, 0);
+      result.push({
+        range: Math.round(finesActualMin),
+        rangeMax: Math.round(lowerBound),
+        count: finesParticles.length,
+        weight,
+        percentage: (weight / totalVolume) * 100,
+        outlier: "fines",
+        actualMin: Math.round(finesActualMin),
+        actualMax: Math.round(lowerBound),
+      });
+    }
   }
 
   for (let i = 0; i < bins; i++) {
