@@ -1,16 +1,26 @@
 import { useLocation } from "wouter";
 import { NavBar } from "../components/nav-bar";
+import { useMeasurementStore } from "../stores/measurement.store";
 import "./capture-guide.css";
 
-const STEPS = [
-  "흰 종이 위에 분쇄한 원두를 얇게 펴주세요",
-  "100원 또는 500원 동전을 같이 놓아주세요 (1개만!)",
-  "균일한 조명 아래에서 촬영해주세요",
-  "동전이 화면 안에 완전히 보이도록 해주세요",
-];
+/**
+ * 단계 안내. 동전 step 은 coin-select 에서 선택한 동전을 명시 (2026-05-07).
+ * coinType null 이면 fallback 으로 "100원 또는 500원" 표시.
+ */
+function buildSteps(coinType: "100" | "500" | null): string[] {
+  const coinLabel = coinType === "100" ? "100원" : coinType === "500" ? "500원" : "100원 또는 500원";
+  return [
+    "흰 종이 위에 분쇄한 원두를 얇게 펴주세요",
+    `${coinLabel} 동전을 1개만 같이 놓아주세요`,
+    "균일한 조명 아래에서 촬영해주세요",
+    "동전이 화면 안에 완전히 보이도록 해주세요",
+  ];
+}
 
 export function CaptureGuideRoute() {
   const [, setLocation] = useLocation();
+  const coinType = useMeasurementStore((s) => s.coinType);
+  const steps = buildSteps(coinType);
 
   return (
     <>
@@ -33,7 +43,7 @@ export function CaptureGuideRoute() {
           </p>
         </aside>
         <ol className="capture-guide-steps">
-          {STEPS.map((step, idx) => (
+          {steps.map((step, idx) => (
             <li key={idx} className="capture-guide-step">
               <span className="capture-guide-step-number">{idx + 1}</span>
               <span className="text-body-large">{step}</span>
