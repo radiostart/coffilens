@@ -155,7 +155,7 @@ export function errorDetails(e: AnalysisError): ErrorDetails {
         ...patternHints.map((h) => `⚠️ ${h}`),
         "100원 또는 500원 동전을 흰 종이 위에 함께 두세요.",
         "동전이 분쇄 커피에 묻히지 않게 옆에 따로 놓아주세요.",
-        "동전이 화면 안에 분명히 보이도록 가까이 찍어주세요.",
+        "동전이 화면 안에 분명히 보이게 찍어주세요.",
       ];
       return {
         title: "동전을 찾지 못했어요",

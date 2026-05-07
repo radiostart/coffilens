@@ -85,14 +85,21 @@ function classifyUniformity(
  * 측정 신뢰도 분류 — mmPerPixel 기준.
  *
  * mmPerPixel 작을수록 (= 동전 화면 비율 큼 = 가까이 촬영) 미세 입자 검출 정확도 ↑.
- * Setting 11 (mmPerPx 0.045) anchor 수준이 high. mmPerPx > 0.07 (5.1, 9 fixture
- * 수준) 은 fine grind 측정 시 sub-pixel particle 누락 가능 → low.
+ *
+ * **임계 완화 (2026-05-07)**: 이전 ≤0.05 / ≤0.07 / >0.07 임계는 fine-grind anchor
+ * (Setting 11) 기준이라 일반 핸드드립 사용자에 너무 엄격. multi-shot 14장 fixture
+ * (mmPerPx 0.09~0.20) 에서 D50 CoV 1.9% 안정 — 일반 핸드폰 거리에서도 정확 측정 가능.
+ *
+ * 새 임계:
+ *  ≤ 0.10 : high   (가까이 촬영, 미세 입자까지 정확)
+ *  ≤ 0.18 : medium (일반 핸드폰 거리, 핸드드립 정확)
+ *   > 0.18 : low    (매우 멀리, espresso/moka 영역 한계)
  */
 function classifyMeasurementConfidence(
   mmPerPixel: number,
 ): "high" | "medium" | "low" {
-  if (mmPerPixel <= 0.05) return "high";
-  if (mmPerPixel <= 0.07) return "medium";
+  if (mmPerPixel <= 0.10) return "high";
+  if (mmPerPixel <= 0.18) return "medium";
   return "low";
 }
 
@@ -141,12 +148,12 @@ export function buildBrewingGuide(input: {
 
   if (measurementConfidence === "low") {
     caveats.push(
-      "측정 정확도 낮음 — 동전이 화면의 30% 이상 차지하도록 더 가까이 촬영하면 결과가 더 정확해져요.",
+      "측정 정확도 낮음 — 동전이 더 잘 보이게 가까이 촬영하면 결과가 더 정확해져요.",
     );
   } else if (measurementConfidence === "medium" && grindClass === "fine") {
     // 'fine' 일 때만 medium confidence 도 추가 caveat (이미 위에서 fine 경고 있음).
     caveats.push(
-      "더 정확하게 측정하려면 동전이 화면 1/3 이상 차도록 가까이 촬영해주세요.",
+      "에스프레소·모카포트 미세 입자까지 정확히 측정하려면 더 가까이 촬영해주세요.",
     );
   }
 

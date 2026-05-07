@@ -41,19 +41,19 @@ export function CaptureGuideRoute() {
           ))}
         </ol>
         {/*
-         * **미세 입자 측정 팁** (2026-05-03):
-         * 카메라 해상도 한계로 동전이 작게 찍히면 sub-pixel 작은 입자가
-         * 검출에서 제외됨 (statistics.ts computeMinDiameter — 픽셀당 µm
-         * 비례). 사용자가 가까이 찍게 가이드하면 100µm 미세 입자까지 측정
-         * 가능. step 4 ("완전히 보이도록") 와 별도 hint card.
+         * **미세 입자 측정 팁** (2026-05-03 / 2026-05-07 톤 완화):
+         * 카메라 해상도 한계로 동전이 매우 작게 찍히면 sub-pixel 작은 입자가
+         * 검출에서 제외됨 (statistics.ts computeMinDiameter — 픽셀당 µm 비례).
+         * 핸드드립 (~600~800µm) 은 평소 거리에서 충분, 에스프레소/모카포트 미세
+         * 영역만 가까이 촬영 권장.
          */}
         <aside className="capture-guide-tip" role="note">
           <span className="capture-guide-tip-icon" aria-hidden="true">💡</span>
           <div className="capture-guide-tip-body">
-            <p className="capture-guide-tip-title">미세 입자(약 100µm)까지 측정하려면</p>
+            <p className="capture-guide-tip-title">에스프레소·모카포트 정확도 높이려면</p>
             <p className="capture-guide-tip-desc">
-              동전이 화면의 1/3 이상 차도록 가까이 찍어주세요. 멀리 찍으면
-              작은 입자가 픽셀보다 작아져 측정에서 빠집니다.
+              동전을 가까이 찍으면 미세 입자(약 100µm)까지 정확히 잡혀요.
+              핸드드립 정도는 평소 거리에서도 충분합니다.
             </p>
           </div>
         </aside>

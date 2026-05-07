@@ -4,7 +4,8 @@ import "./coin-overlay.css";
  * 카메라 위 촬영 가이드.
  *
  * 캡처/검출 모두 전체 프레임 사용 — 박스 ROI 아님.
- * 동전이 화면 1/3 이상 차야 미세 입자(~100µm) 측정 가능 (capture-guide 와 일치).
+ * 동전과 분쇄물이 함께 화면에 보이면 측정 가능. 가까이 찍을수록 미세 입자
+ * (~100µm) 검출 정확도 ↑ (capture-guide 와 일치, 2026-05-07 임계 완화).
  */
 export function CoinOverlay() {
   return (
@@ -17,7 +18,7 @@ export function CoinOverlay() {
       </div>
       <div className="coin-overlay-hint">
         <p className="text-caption">
-          동전이 화면 1/3 이상 차게, 분쇄물과 함께 담아주세요
+          동전과 분쇄물이 화면에 함께 보이게 담아주세요
         </p>
       </div>
     </div>

@@ -32,29 +32,32 @@ describe("classifyD50 — 3-카테고리 경계값", () => {
   });
 });
 
-describe("classifyMeasurementConfidence — mmPerPixel 임계", () => {
+// 임계 완화 (2026-05-07): ≤0.10 high / ≤0.18 medium / >0.18 low
+// 이전 ≤0.05 / ≤0.07 / >0.07 (Setting 11 anchor 기준) 가 일반 사용자에 너무 엄격해
+// multi-shot baseline (mmPerPx 0.09~0.20, CoV 1.9%) 과 정합되게 완화.
+describe("classifyMeasurementConfidence — mmPerPixel 임계 (2026-05-07 완화)", () => {
   it("0.045 (Setting 11 anchor) → high", () => {
     expect(classifyMeasurementConfidence(0.045)).toBe("high");
   });
 
-  it("0.050 boundary → high (≤)", () => {
-    expect(classifyMeasurementConfidence(0.05)).toBe("high");
+  it("0.10 boundary → high (≤)", () => {
+    expect(classifyMeasurementConfidence(0.1)).toBe("high");
   });
 
-  it("0.060 (Setting 13) → medium", () => {
-    expect(classifyMeasurementConfidence(0.06)).toBe("medium");
+  it("0.11 (multi-shot anchor 일반 거리) → medium", () => {
+    expect(classifyMeasurementConfidence(0.11)).toBe("medium");
   });
 
-  it("0.070 boundary → medium (≤)", () => {
-    expect(classifyMeasurementConfidence(0.07)).toBe("medium");
+  it("0.18 boundary → medium (≤)", () => {
+    expect(classifyMeasurementConfidence(0.18)).toBe("medium");
   });
 
-  it("0.068 (Setting 5.1 re-shot) → medium", () => {
-    expect(classifyMeasurementConfidence(0.068)).toBe("medium");
+  it("0.15 (일반 핸드폰 거리) → medium", () => {
+    expect(classifyMeasurementConfidence(0.15)).toBe("medium");
   });
 
-  it("0.128 (Setting 5.1 original far) → low", () => {
-    expect(classifyMeasurementConfidence(0.128)).toBe("low");
+  it("0.25 (매우 멀리 촬영) → low", () => {
+    expect(classifyMeasurementConfidence(0.25)).toBe("low");
   });
 });
 
@@ -77,11 +80,12 @@ describe("buildBrewingGuide — coarse grind + medium confidence (5.1 시나리�
   it("sieve 1033μm + medium confidence → 거침 + caveat 없음 (coarse 는 픽셀 한계 무관)", () => {
     // 2026-05-03 변경: 픽셀 한계 caveat 는 fine grind 에서만 노출.
     // coarse 측정은 입자 크고 sub-pixel 한계 영향 없음.
+    // 2026-05-07: 임계 완화로 0.068 → high. medium 시나리오는 0.15 로 갱신.
     const guide = buildBrewingGuide({
       d50: 1033, // Setting 5.1 re-shot sieve
       uniformity: 5.67,
       clumpAreaRatio: 15.6,
-      mmPerPixel: 0.068,
+      mmPerPixel: 0.15,
     });
     expect(guide.measurementConfidence).toBe("medium");
     expect(guide.primary).toEqual(["프렌치프레스", "콜드브루"]);
@@ -120,11 +124,12 @@ describe("buildBrewingGuide — fine 카테고리 (espresso/moka)", () => {
 
 describe("buildBrewingGuide — coarse 카테고리 (french press)", () => {
   it("sieve 1100μm + medium → 거침 + 프렌치프레스·콜드브루 추천", () => {
+    // 2026-05-07: 임계 완화로 0.06 → high. medium 시나리오는 0.15 로 갱신.
     const guide = buildBrewingGuide({
       d50: 1100,
       uniformity: 5.0,
       clumpAreaRatio: 0.0,
-      mmPerPixel: 0.06,
+      mmPerPixel: 0.15,
     });
     expect(guide.primary).toEqual(["프렌치프레스", "콜드브루"]);
     expect(guide.measurementConfidence).toBe("medium");
@@ -132,16 +137,17 @@ describe("buildBrewingGuide — coarse 카테고리 (french press)", () => {
 });
 
 describe("buildBrewingGuide — low confidence caveat", () => {
-  it("mmPerPx 0.10 (먼 촬영) → low + 가까이 촬영 안내", () => {
+  it("mmPerPx 0.25 (매우 멀리) → low + 가까이 촬영 안내", () => {
+    // 2026-05-07: low 임계 0.07 → 0.18 완화. 0.25 는 여전히 low.
     const guide = buildBrewingGuide({
       d50: 700,
       uniformity: 4.0,
       clumpAreaRatio: 0.0,
-      mmPerPixel: 0.10,
+      mmPerPixel: 0.25,
     });
     expect(guide.measurementConfidence).toBe("low");
     expect(guide.caveat).toBeDefined();
-    expect(guide.caveat).toContain("30%");
+    expect(guide.caveat).toContain("가까이");
   });
 });
 
