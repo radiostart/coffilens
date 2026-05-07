@@ -157,6 +157,24 @@ const MAIN_FRACTION_MIN_UM = 117;
 // 15mm 초과는 사실상 분쇄 입자가 아닌 배경 영역.
 const MAX_PARTICLE_DIAMETER_UM = 15000;
 
+// **Grind size sanity check** (2026-05-06 추가):
+// 분쇄 가능한 입자 크기의 현실적 상한. 이보다 큰 contour 는 "분쇄 안 된 통원두",
+// "image artifact (그림자/검정 print 합성)", "여러 입자가 잘못 merged 된 over-
+// segmentation 실패" 등으로 간주해 통계에서 완전 제외 (boulder/clump 분류도 안 함).
+//
+// 도입 배경: 사용자 보고 — 단일 6517µm contour 1개가 전체 부피의 79.2% 차지하는
+// 케이스 발생 (통원두 또는 artifact 추정). MAX_PARTICLE_DIAMETER_UM (15mm) 안전망은
+// 너무 관대해 6.5mm 가 통과 → 측정값 통째로 왜곡.
+//
+// 임계값 3000µm (3mm) 근거:
+//   - Espresso/모카포트 worst-case ~1mm
+//   - 핸드드립 worst-case ~1.5mm
+//   - French Press worst-case ~2mm
+//   - 응집체 (clump artifact) 최대 ~2.5mm
+//   - 통원두 ~7mm (catch 대상)
+//   - 3mm = 모든 합리적 분쇄 + 응집체 + 안전 margin, 통원두 / artifact 차단
+const GRIND_MAX_DIAMETER_UM = 3000;
+
 // 클럼프 (덩어리) 분리 임계 — 통계 오염 방지.
 // tuned 2026-05-02 (revision 3 — V60 핸드드립 정확도 우선 cap 강화).
 // 분쇄가 안 된 덩어리, 추출 후 압착된 퍽 잔여물 등 "정상 입자" 가 아닌 outlier.
@@ -294,6 +312,11 @@ export function computeStats(
       continue;
     }
     if (diameterUm > MAX_PARTICLE_DIAMETER_UM) {
+      aboveMaxCount++;
+      continue;
+    }
+    // 분쇄 가능한 크기 상한 (3mm) 초과 — 통원두/artifact 추정, 통계에서 완전 제외
+    if (diameterUm > GRIND_MAX_DIAMETER_UM) {
       aboveMaxCount++;
       continue;
     }
@@ -710,6 +733,7 @@ export function extractParticleMarkers(
     if (!centroid) continue;
     if (diameterUm < minDiameterUm) continue;
     if (diameterUm > MAX_PARTICLE_DIAMETER_UM) continue;
+    if (diameterUm > GRIND_MAX_DIAMETER_UM) continue; // grind sanity 초과 (통원두/artifact)
 
     const rPx = Math.sqrt(areaPx / Math.PI);
 
