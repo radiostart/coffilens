@@ -63,11 +63,12 @@ manifest 의 anchor 분석 결과 ratio 가 grind 영역마다 다름:
 
 **3. 분석 + raw D50 기록**
 ```bash
-npx tsx scripts/batch-analyze.ts <fraction-photos-dir> <coin-type>
+npx tsx scripts/measure-raw-d50.ts <fraction-photo> <coinType>
 ```
-- 출력의 D50 이 *image-space* 임을 주의 (이미 0.63 곱해진 sieve-space 값임)
-- 진짜 raw D50 얻으려면 0.63 으로 다시 나눔: `raw_D50 = output_D50 / 0.63`
-- 또는 임시로 `defaultRatio: 1.0` 으로 테스트 후 그 값을 기록
+- 출력에서 **`raw D50`** 값을 그대로 기록. anchor 등록용 JSON 템플릿도 같이 출력됨.
+- production pipeline 과 별개 — calibration 미적용 *raw image-space* D50 직접 출력.
+- 측정 결과는 영향 없음 (읽기 전용 진단 도구).
+- 같은 fraction 사진 여러 장 있으면 각각 측정 후 평균.
 
 **4. anchor 등록**
 
@@ -127,13 +128,36 @@ npx tsx scripts/batch-analyze.ts <photo>
 
 ## anchor 작성 시 주의사항
 
-1. **`rawD50um` 은 calibration 전 값** — output stats 의 D50 을 그대로 쓰면
-   double-calibration. 수집 시 `defaultRatio: 1.0` 으로 임시 변경 후 측정 → 원복.
+1. **`rawD50um` 은 `measure-raw-d50.ts` 출력 그대로** — production stats 의
+   D50 을 쓰면 double-calibration (이미 ratio 곱해진 값에 또 보간). 위 도구가
+   raw image-space 값을 직접 출력하므로 그대로 복사.
 2. **`targetD50um` 은 sieve fraction 의 mean (mid-point)** — 사용한 두 sieve
    사이의 중간값. e.g. #30~#35 fraction → (600 + 500) / 2 = 550μm.
 3. **같은 grinder + 비슷한 mmPerPx** 환경에서 수집한 사진들로 통계내야 의미 있음.
    다른 grinder (예: hand grinder) 는 별도 anchor set 또는 정확도 한계 인정.
 4. **`label` 은 자유** — 사람이 읽을 수 있는 식별자. 보간 로직은 사용 안 함.
+
+## anchor 등록 후 검증
+
+anchor 추가 → 측정값이 변함 (의도한 변화). 변경 전후 비교로 *기대 방향* 인지 확인:
+
+```bash
+# anchor 추가 전 측정 결과 저장
+npx tsx scripts/batch-analyze.ts <fixture-set> <coinType>
+cp .gstack/batch-analyze-result.json /tmp/before.json
+
+# calibration-data.json 에 anchor 추가
+
+# anchor 추가 후 측정
+npx tsx scripts/batch-analyze.ts <fixture-set> <coinType>
+cp .gstack/batch-analyze-result.json /tmp/after.json
+
+# diff
+diff <(jq -S '.[].d50' /tmp/before.json) <(jq -S '.[].d50' /tmp/after.json)
+```
+
+새 D50 이 sieve target 에 가까워지는 방향이면 OK. 반대 방향이면 anchor 데이터
+재검토 (rawD50 측정 환경 일관성, target 계산 오류 등).
 
 ---
 
