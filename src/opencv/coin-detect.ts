@@ -403,13 +403,37 @@ interface AnnotatedCircle {
 const COIN_GRADIENT_STRONG_BYPASS_RELAXED = 35;
 
 /**
+ * **Phantom size sanity (2026-05-09)**: HoughCircles 가 배경/그림자 boundary
+ * 를 거대한 phantom 원으로 false-detect 하는 회귀 차단. test-vs3-051 케이스:
+ * r=449 in 960×1280 (47% of min dim) → 진짜 동전 r=97 보다 4.6배 큰 phantom
+ * 이 "biggest passes wins" 선택 로직에 잡혀 partial_coin 으로 fail.
+ *
+ * **임계 결정 근거** (현 fixture 데이터, 모두 960×1280):
+ *   진짜 동전 max r/min:   19.9% (test-vs3-09 close-up, r=190.8)
+ *   phantom (test-vs3-051):  47.0% (r=449)
+ *   임계 35% — 정상 case max 19.9% 위로 1.75x 마진, phantom 12% 아래 거리 충분
+ *
+ * Hough 의 maxRadius 자체는 안 건드림 (gray.rows*0.4 = 40% of height).
+ * post-Hough candidate 단계에서 reject — 진단 로그에 phantom 가시화 +
+ * 사용자에게 "oversized" 패턴 hint 노출 가능.
+ */
+const COIN_MAX_RADIUS_RATIO = 0.35;
+
+/**
  * 후보 원이 동전 filter 를 통과했는지 — 통과하면 null, fail 하면 첫 fail 이유.
  * `coinCandidates` filter 와 `no_coin` 진단 candidate 분류가 동일 ladder 를 공유.
+ *
+ * @param maxR 이미지 min(w,h) × COIN_MAX_RADIUS_RATIO — phantom size sanity.
+ *             0 또는 미지정 시 size 검사 skip (테스트 mock 호환).
  */
 function deriveRejectReason(
   c: AnnotatedCircle,
   bypassGrad: number = COIN_GRADIENT_STRONG_BYPASS,
+  maxR: number = 0,
 ): CandidateRejectReason | null {
+  // size sanity 가 가장 먼저 — phantom 은 mean/stddev/grad 가 동전스럽게 보일
+  // 수 있어 다른 필터를 통과할 위험. 절대 크기 자체로 즉시 reject.
+  if (maxR > 0 && c.r > maxR) return "oversized";
   if (c.mean < COIN_MIN_MEAN_INTENSITY && c.rimGradient < bypassGrad) {
     return "too_dark";
   }
@@ -598,9 +622,11 @@ async function detectCoinFromHint(
     // 사용자가 *명시적으로* 코인 위치 탭 → CLAHE retry 와 동일 bypass=35
     // 완화 적용 (그림자 진 marginal coin 에서도 통과). 일반 Hough 경로 의
     // 기본 50 보다 완화 — 사용자 의도 신뢰.
+    const tapMaxR = Math.min(gray.cols, gray.rows) * COIN_MAX_RADIUS_RATIO;
     const reason = deriveRejectReason(
       annotated,
       COIN_GRADIENT_STRONG_BYPASS_RELAXED,
+      tapMaxR,
     );
     if (reason !== null) {
       throw {
@@ -785,12 +811,16 @@ export async function detectCoin(
       const bypassGrad = useClahe
         ? COIN_GRADIENT_STRONG_BYPASS_RELAXED
         : COIN_GRADIENT_STRONG_BYPASS;
+      const maxR = Math.min(gray.cols, gray.rows) * COIN_MAX_RADIUS_RATIO;
       const ann: AnnotatedWithReason[] = sortedCircles.map((c) => {
         const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
         const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
         const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
         const enriched = { ...c, ...interior, exterior, rimGradient };
-        return { ...enriched, reason: deriveRejectReason(enriched, bypassGrad) };
+        return {
+          ...enriched,
+          reason: deriveRejectReason(enriched, bypassGrad, maxR),
+        };
       });
       console.log(
         `[coin-detect]${tag} all circles:`,
