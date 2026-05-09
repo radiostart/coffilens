@@ -220,14 +220,15 @@ describe("detectCoin — 분기 동작", () => {
     setupCvMock({ circles: [360, 640, 80], imgRows: 1280, imgCols: 720 });
     const result = await detectCoin(fakeCanvas(), "500");
 
-    // center 는 RANSAC+Kasa refinement 가 ±r*0.1 이내에서 sub-pixel 이동 가능
-    // (mock stripe 데이터에서는 합성 gradient 에 fit 되어 1~3px 이동 정상).
-    // r 은 caller 가 Hough 출력 그대로 유지 → exact match.
+    // RANSAC+Kasa refinement 는 (cx, cy, r) 모두 ±r*0.1 (= ±8) 이내에서 변할
+    // 수 있음. mock stripe 데이터에서는 합성 gradient 에 fit 되므로 어떤 sub-
+    // pixel 이동/축소든 sanity 범위 안에 떨어지면 OK.
     expect(result.centerX).toBeGreaterThan(360 - 8);
     expect(result.centerX).toBeLessThan(360 + 8);
     expect(result.centerY).toBeGreaterThan(640 - 8);
     expect(result.centerY).toBeLessThan(640 + 8);
-    expect(result.radiusPx).toBe(80);
+    expect(result.radiusPx).toBeGreaterThan(80 - 8);
+    expect(result.radiusPx).toBeLessThan(80 + 8);
     expect(result.confidence).toBeGreaterThan(0);
     expect(result.confidence).toBeLessThanOrEqual(1);
     // mm/pixel 합리 범위 (0.05 ~ 0.2)

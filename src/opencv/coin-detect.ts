@@ -590,16 +590,24 @@ async function detectCoinFromHint(
     }
     const houghCx = circles.data32F[bestIdx * 3] + x0;
     const houghCy = circles.data32F[bestIdx * 3 + 1] + y0;
-    const r = circles.data32F[bestIdx * 3 + 2];
+    const houghR = circles.data32F[bestIdx * 3 + 2];
 
-    // **center sub-pixel refinement (RANSAC + Kasa)**: r 은 그대로 유지
-    // (mmPerPixel 보존 → 측정값 변화 0). center 만 외곽 rim fit 으로 정밀화.
-    const refined = refineCenterRansacKasa(grayOriginal, houghCx, houghCy, r);
+    // **circle refinement (RANSAC + Kasa)**: (cx, cy, r) 모두 sub-pixel 보정.
+    // 실패 시 Hough 결과 fallback.
+    const refined = refineCenterRansacKasa(
+      grayOriginal,
+      houghCx,
+      houghCy,
+      houghR,
+    );
     const cx = refined ? refined.cx : houghCx;
     const cy = refined ? refined.cy : houghCy;
+    const r = refined ? refined.r : houghR;
     if (refined) {
+      const houghGrad = meanRimGradient(grayOriginal, houghCx, houghCy, houghR);
+      const refinedGrad = meanRimGradient(grayOriginal, cx, cy, r);
       console.log(
-        `[coin-detect][tap] center refined: (${houghCx.toFixed(1)},${houghCy.toFixed(1)}) → (${cx.toFixed(2)},${cy.toFixed(2)}) Δ=${Math.hypot(cx - houghCx, cy - houghCy).toFixed(2)}px`,
+        `[coin-detect][tap] circle refined: (${houghCx.toFixed(1)},${houghCy.toFixed(1)},r=${houghR.toFixed(1)}) → (${cx.toFixed(2)},${cy.toFixed(2)},r=${r.toFixed(2)}) Δc=${Math.hypot(cx - houghCx, cy - houghCy).toFixed(2)}px Δr=${(r - houghR).toFixed(2)}px | rim grad ${houghGrad.toFixed(1)} → ${refinedGrad.toFixed(1)}`,
       );
     }
 
@@ -934,17 +942,24 @@ export async function detectCoin(
       selectedCandidate = coinCandidates[0];
     }
 
-    const { cx: houghCx, cy: houghCy, r } = selectedCandidate;
+    const { cx: houghCx, cy: houghCy, r: houghR } = selectedCandidate;
 
-    // **center sub-pixel refinement (RANSAC + Kasa)**: r 은 그대로 유지
-    // (mmPerPixel 보존). center 만 외곽 rim fit 으로 정밀화. fallback null
-    // → Hough 결과 그대로 (변경 없음).
-    const refined = refineCenterRansacKasa(grayOriginal, houghCx, houghCy, r);
+    // **circle refinement (RANSAC + Kasa)**: (cx, cy, r) 모두 sub-pixel 보정.
+    // 실패 시 Hough 결과 fallback.
+    const refined = refineCenterRansacKasa(
+      grayOriginal,
+      houghCx,
+      houghCy,
+      houghR,
+    );
     const cx = refined ? refined.cx : houghCx;
     const cy = refined ? refined.cy : houghCy;
+    const r = refined ? refined.r : houghR;
     if (refined) {
+      const houghGrad = meanRimGradient(grayOriginal, houghCx, houghCy, houghR);
+      const refinedGrad = meanRimGradient(grayOriginal, cx, cy, r);
       console.log(
-        `[coin-detect] center refined: (${houghCx.toFixed(1)},${houghCy.toFixed(1)}) → (${cx.toFixed(2)},${cy.toFixed(2)}) Δ=${Math.hypot(cx - houghCx, cy - houghCy).toFixed(2)}px`,
+        `[coin-detect] circle refined: (${houghCx.toFixed(1)},${houghCy.toFixed(1)},r=${houghR.toFixed(1)}) → (${cx.toFixed(2)},${cy.toFixed(2)},r=${r.toFixed(2)}) Δc=${Math.hypot(cx - houghCx, cy - houghCy).toFixed(2)}px Δr=${(r - houghR).toFixed(2)}px | rim grad ${houghGrad.toFixed(1)} → ${refinedGrad.toFixed(1)}`,
       );
     }
 
@@ -976,8 +991,8 @@ export async function detectCoin(
 }
 
 /**
- * **RANSAC + Kasa rim circle fit** — Hough 의 양자화 center 를 외곽 rim edge
- * 로부터 sub-pixel 보정.
+ * **RANSAC + Kasa rim circle fit** — Hough 의 양자화 (cx, cy, r) 를 외곽 rim
+ * edge 로부터 sub-pixel 보정.
  *
  * 동기: Hough 가 (cx, cy, r) 을 1~2px 양자화 → 코인 시각 표시 / 입자 mask 위치
  * 가 약간 어긋남. 외곽 rim 은 face 종류 (100원 앞/뒷, 500원 앞/뒷) 무관하게
@@ -988,13 +1003,19 @@ export async function detectCoin(
  *   2. RANSAC: 무작위 3점 → circumscribed circle → inlier 수 카운트 → 최다 모델 채택
  *   3. consensus set 에 Kasa algebraic fit (3×3 linear system) 으로 sub-pixel
  *
- * **r 보존 (no-regression first)**: refined.r 은 사용하지 않고 caller 가 Hough r
- * 그대로 유지. mmPerPixel = D / (2r) 이라 r 동일 = 측정값 동일. center 만
- * sub-pixel 이동 → coin mask 위치 미세 변경. 입자 측정 영향 검증 (2026-05-09):
- *   - 7개 baseline fixture 중 5개 byte-identical, 2개 sub-1μm rounding 변화
- *     (coin mask 1~3px shift 로 rim 경계 contour 1~3개 재분류, 정수 D50 동일)
- *   - coinRadiusPx, mmPerPx 7/7 fixture 완전 동일 (r 보존 정책 작동 확인)
- *   - 그림자 fixture (shadow-001/002, fail-002/003) 에서 1.4~3.6px 보정 활성화
+ * **결과 (cx, cy, r) 모두 사용** (2026-05-09 정정): 초기 정책은 r 보존 (Hough
+ * r 유지) 으로 측정값 byte-identical 보장이 목적이었으나 검증 결과 *역효과*:
+ *   - rim gradient 메트릭으로 측정 시 (cx_ref, cy_ref, r_hough) 의 rim 정렬이
+ *     Hough 보다 87% **악화** (r 미스매치로 32 sample 위치가 rim 에서 빗나감)
+ *   - (cx_ref, cy_ref, r_ref) 의 rim 정렬은 Hough 보다 65% **개선** (+4~+41 grad)
+ * 즉 Kasa fit 의 (center, r) 는 같이 쓸 때만 의미 있고, center 만 빼서 Hough
+ * r 과 결합하는 건 양쪽 optimum 의 단점만 결합 (Frankenstein). 따라서 *full
+ * 출력 사용* 으로 정정.
+ *
+ * **측정 영향**: refined.r 사용 → mmPerPixel = D / (2 × refined.r) 도 변경 →
+ * D-value 등 측정값 미세 변화 (μm 단위). 사용자 정책 결정 (2026-05-09):
+ * "동전 사이즈 검출 변경에 따른 마이크론 값 변화는 당연" — rim 정렬 정확도
+ * 향상의 trade-off 로 수용.
  *
  * **결정성**: RANSAC 의 randomness 가 측정 비결정성을 만들면 곤란. seed 를
  * Hough 출력 (cx0, cy0, r0) 에서 유도 → 같은 사진에 항상 같은 결과.
