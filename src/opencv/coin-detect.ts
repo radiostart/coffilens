@@ -534,9 +534,20 @@ async function detectCoinFromHint(
         bestIdx = i;
       }
     }
-    const cx = circles.data32F[bestIdx * 3] + x0;
-    const cy = circles.data32F[bestIdx * 3 + 1] + y0;
+    const houghCx = circles.data32F[bestIdx * 3] + x0;
+    const houghCy = circles.data32F[bestIdx * 3 + 1] + y0;
     const r = circles.data32F[bestIdx * 3 + 2];
+
+    // **center sub-pixel refinement (RANSAC + Kasa)**: r 은 그대로 유지
+    // (mmPerPixel 보존 → 측정값 변화 0). center 만 외곽 rim fit 으로 정밀화.
+    const refined = refineCenterRansacKasa(grayOriginal, houghCx, houghCy, r);
+    const cx = refined ? refined.cx : houghCx;
+    const cy = refined ? refined.cy : houghCy;
+    if (refined) {
+      console.log(
+        `[coin-detect][tap] center refined: (${houghCx.toFixed(1)},${houghCy.toFixed(1)}) → (${cx.toFixed(2)},${cy.toFixed(2)}) Δ=${Math.hypot(cx - houghCx, cy - houghCy).toFixed(2)}px`,
+      );
+    }
 
     // 전체 이미지 좌표계에서 검증
     const interior = intensityStatsInCircle(gray, cx, cy, r);
@@ -863,7 +874,19 @@ export async function detectCoin(
       selectedCandidate = coinCandidates[0];
     }
 
-    const { cx, cy, r } = selectedCandidate;
+    const { cx: houghCx, cy: houghCy, r } = selectedCandidate;
+
+    // **center sub-pixel refinement (RANSAC + Kasa)**: r 은 그대로 유지
+    // (mmPerPixel 보존). center 만 외곽 rim fit 으로 정밀화. fallback null
+    // → Hough 결과 그대로 (변경 없음).
+    const refined = refineCenterRansacKasa(grayOriginal, houghCx, houghCy, r);
+    const cx = refined ? refined.cx : houghCx;
+    const cy = refined ? refined.cy : houghCy;
+    if (refined) {
+      console.log(
+        `[coin-detect] center refined: (${houghCx.toFixed(1)},${houghCy.toFixed(1)}) → (${cx.toFixed(2)},${cy.toFixed(2)}) Δ=${Math.hypot(cx - houghCx, cy - houghCy).toFixed(2)}px`,
+      );
+    }
 
     // partial_coin 검사 — 동전이 이미지 가장자리에 잘리면 mmPerPixel 환산 부정확.
     if (
@@ -890,6 +913,236 @@ export async function detectCoin(
       confidence,
     };
   });
+}
+
+/**
+ * **RANSAC + Kasa rim circle fit** — Hough 의 양자화 center 를 외곽 rim edge
+ * 로부터 sub-pixel 보정.
+ *
+ * 동기: Hough 가 (cx, cy, r) 을 1~2px 양자화 → 코인 시각 표시 / 입자 mask 위치
+ * 가 약간 어긋남. 외곽 rim 은 face 종류 (100원 앞/뒷, 500원 앞/뒷) 무관하게
+ * 가장 일관된 feature → 거기서 직접 fit 하면 정확.
+ *
+ * 알고리즘:
+ *   1. annulus (r ± half) 안에서 finite-diff gradient 큰 픽셀만 수집
+ *   2. RANSAC: 무작위 3점 → circumscribed circle → inlier 수 카운트 → 최다 모델 채택
+ *   3. consensus set 에 Kasa algebraic fit (3×3 linear system) 으로 sub-pixel
+ *
+ * **r 보존 (no-regression first)**: refined.r 은 사용하지 않고 caller 가 Hough r
+ * 그대로 유지. mmPerPixel = D / (2r) 이라 r 동일 = 측정값 동일. center 만
+ * sub-pixel 이동 → coin mask 위치 미세 변경. 입자 측정 영향 검증 (2026-05-09):
+ *   - 7개 baseline fixture 중 5개 byte-identical, 2개 sub-1μm rounding 변화
+ *     (coin mask 1~3px shift 로 rim 경계 contour 1~3개 재분류, 정수 D50 동일)
+ *   - coinRadiusPx, mmPerPx 7/7 fixture 완전 동일 (r 보존 정책 작동 확인)
+ *   - 그림자 fixture (shadow-001/002, fail-002/003) 에서 1.4~3.6px 보정 활성화
+ *
+ * **결정성**: RANSAC 의 randomness 가 측정 비결정성을 만들면 곤란. seed 를
+ * Hough 출력 (cx0, cy0, r0) 에서 유도 → 같은 사진에 항상 같은 결과.
+ *
+ * 실패 (edge 점 < min, inlier < min, 선형계 특이) → null 반환. caller fallback.
+ */
+
+const REFINE_ANNULUS_HALF = 5;
+const REFINE_GRAD_THRESHOLD = 30; // finite-diff |Δ| ≥ 30 → edge 점
+const REFINE_RANSAC_ITER = 100;
+const REFINE_INLIER_PX = 1.5;
+const REFINE_MIN_INLIERS = 50;
+const REFINE_MIN_EDGE_POINTS = 100;
+
+function makeLcgRng(seed: number): () => number {
+  // 간단한 LCG (Numerical Recipes). 결정적이며 분포 충분히 균일.
+  let state = (seed >>> 0) || 1;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+}
+
+/** 3 점 외접원 — 양자화된 RANSAC 후보 모델 생성에 사용. */
+function circumscribedCircle(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+): { cx: number; cy: number; r: number } | null {
+  const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+  if (Math.abs(d) < 1e-9) return null; // colinear
+  const a2 = ax * ax + ay * ay;
+  const b2 = bx * bx + by * by;
+  const c2 = cx * cx + cy * cy;
+  const ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d;
+  const uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d;
+  const dx = ax - ux;
+  const dy = ay - uy;
+  return { cx: ux, cy: uy, r: Math.sqrt(dx * dx + dy * dy) };
+}
+
+/**
+ * Kasa algebraic fit on N points: minimize Σ(x²+y² + Dx + Ey + F)²
+ * Normal equation: 3×3 linear system. center=(-D/2, -E/2), r=√((D²+E²)/4 - F)
+ */
+function kasaFit(
+  points: Array<{ x: number; y: number }>,
+): { cx: number; cy: number; r: number } | null {
+  const n = points.length;
+  if (n < 3) return null;
+  let sx = 0,
+    sy = 0,
+    sxx = 0,
+    syy = 0,
+    sxy = 0,
+    sxxx = 0,
+    syyy = 0,
+    sxyy = 0,
+    sxxy = 0;
+  for (const p of points) {
+    const x = p.x;
+    const y = p.y;
+    sx += x;
+    sy += y;
+    sxx += x * x;
+    syy += y * y;
+    sxy += x * y;
+    sxxx += x * x * x;
+    syyy += y * y * y;
+    sxyy += x * y * y;
+    sxxy += x * x * y;
+  }
+  // [sxx sxy sx ] [D]   [-(sxxx + sxyy)]
+  // [sxy syy sy ] [E] = [-(syyy + sxxy)]
+  // [sx  sy  n  ] [F]   [-(sxx  + syy )]
+  const a = [
+    [sxx, sxy, sx],
+    [sxy, syy, sy],
+    [sx, sy, n],
+  ];
+  const b = [-(sxxx + sxyy), -(syyy + sxxy), -(sxx + syy)];
+  const det = (m: number[][]): number =>
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const D0 = det(a);
+  if (Math.abs(D0) < 1e-9) return null;
+  const sub = (col: number, vec: number[]): number[][] =>
+    a.map((row, i) => row.map((v, j) => (j === col ? vec[i] : v)));
+  const D = det(sub(0, b)) / D0;
+  const E = det(sub(1, b)) / D0;
+  const F = det(sub(2, b)) / D0;
+  const cx = -D / 2;
+  const cy = -E / 2;
+  const r2 = (D * D + E * E) / 4 - F;
+  if (r2 <= 0) return null;
+  return { cx, cy, r: Math.sqrt(r2) };
+}
+
+/**
+ * RANSAC + Kasa rim center refinement.
+ *
+ * @param grayOriginal sharp gray (no median blur — gradient 보존)
+ * @param cx0,cy0,r0   Hough 의 rough 검출 결과
+ * @returns refined (cx, cy, r) — caller 는 cx/cy 만 사용 권장 (r 은 보존)
+ */
+function refineCenterRansacKasa(
+  grayOriginal: CvMat,
+  cx0: number,
+  cy0: number,
+  r0: number,
+): { cx: number; cy: number; r: number } | null {
+  const cols = grayOriginal.cols;
+  const rows = grayOriginal.rows;
+  const data = grayOriginal.data;
+  const innerR = Math.max(1, r0 - REFINE_ANNULUS_HALF);
+  const outerR = r0 + REFINE_ANNULUS_HALF;
+  const innerR2 = innerR * innerR;
+  const outerR2 = outerR * outerR;
+  const x0 = Math.max(1, Math.floor(cx0 - outerR));
+  const x1 = Math.min(cols - 2, Math.ceil(cx0 + outerR));
+  const y0 = Math.max(1, Math.floor(cy0 - outerR));
+  const y1 = Math.min(rows - 2, Math.ceil(cy0 + outerR));
+  const gradT2 = REFINE_GRAD_THRESHOLD * REFINE_GRAD_THRESHOLD;
+
+  // Step 1: annulus 안 finite-diff gradient ≥ threshold 픽셀 수집.
+  const points: Array<{ x: number; y: number }> = [];
+  for (let y = y0; y <= y1; y++) {
+    const dy = y - cy0;
+    const dy2 = dy * dy;
+    const row = y * cols;
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - cx0;
+      const d2 = dx * dx + dy2;
+      if (d2 < innerR2 || d2 > outerR2) continue;
+      const gx = data[row + (x + 1)] - data[row + (x - 1)];
+      const gy = data[(y + 1) * cols + x] - data[(y - 1) * cols + x];
+      if (gx * gx + gy * gy < gradT2) continue;
+      points.push({ x, y });
+    }
+  }
+  if (points.length < REFINE_MIN_EDGE_POINTS) return null;
+
+  // Step 2: RANSAC. 결정적 seed = Hough 출력에서 유도.
+  const rng = makeLcgRng(
+    Math.floor(cx0) ^ (Math.floor(cy0) << 8) ^ (Math.floor(r0) << 16),
+  );
+  const N = points.length;
+  let bestInlierCount = 0;
+  let bestFit: { cx: number; cy: number; r: number } | null = null;
+  for (let iter = 0; iter < REFINE_RANSAC_ITER; iter++) {
+    const i1 = Math.floor(rng() * N);
+    let i2 = Math.floor(rng() * N);
+    if (i2 === i1) i2 = (i1 + 1) % N;
+    let i3 = Math.floor(rng() * N);
+    if (i3 === i1 || i3 === i2) i3 = (Math.max(i1, i2) + 1) % N;
+    const fit = circumscribedCircle(
+      points[i1].x,
+      points[i1].y,
+      points[i2].x,
+      points[i2].y,
+      points[i3].x,
+      points[i3].y,
+    );
+    if (!fit) continue;
+    // sanity: 중심이 Hough 에서 너무 멀거나 r 이 크게 다르면 polluted sample → skip.
+    if (
+      Math.hypot(fit.cx - cx0, fit.cy - cy0) > r0 * 0.2 ||
+      Math.abs(fit.r - r0) > r0 * 0.2
+    ) {
+      continue;
+    }
+    let inlierCount = 0;
+    for (const p of points) {
+      const ddx = p.x - fit.cx;
+      const ddy = p.y - fit.cy;
+      const d = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (Math.abs(d - fit.r) <= REFINE_INLIER_PX) inlierCount++;
+    }
+    if (inlierCount > bestInlierCount) {
+      bestInlierCount = inlierCount;
+      bestFit = fit;
+    }
+  }
+  if (!bestFit || bestInlierCount < REFINE_MIN_INLIERS) return null;
+
+  // Step 3: best 모델로 inlier 재수집 후 Kasa LSE refit (sub-pixel).
+  const inliers: Array<{ x: number; y: number }> = [];
+  for (const p of points) {
+    const ddx = p.x - bestFit.cx;
+    const ddy = p.y - bestFit.cy;
+    const d = Math.sqrt(ddx * ddx + ddy * ddy);
+    if (Math.abs(d - bestFit.r) <= REFINE_INLIER_PX) inliers.push(p);
+  }
+  if (inliers.length < REFINE_MIN_INLIERS) return null;
+  const refined = kasaFit(inliers);
+  if (!refined) return null;
+  // 최종 sanity: Hough 에서 너무 벗어나면 거부.
+  if (
+    Math.hypot(refined.cx - cx0, refined.cy - cy0) > r0 * 0.1 ||
+    Math.abs(refined.r - r0) > r0 * 0.1
+  ) {
+    return null;
+  }
+  return refined;
 }
 
 /**
