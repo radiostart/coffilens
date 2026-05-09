@@ -793,15 +793,15 @@ export async function detectCoin(
       if (maxCluster < 3 || maxCluster > 6) return initR;
 
       // 그림자 감지 — sweep refinement 적용.
-      // 전략: ±10% sweep 후 peak grad 의 95% 이상인 *eligible local maxima* 의
-      // **평균 r** 채택. 그림자 케이스에서 Hough 가 (실제 rim) + (그림자
-      // boundary edge) 둘 다 동등 강도 vote 받아 한쪽으로 치우친 회귀를 보정 —
-      // 두 peak 의 중점이 실제 rim 추정치에 가까움.
+      // 전략: ±10% sweep 후 peak grad 의 95% 이상인 eligible local maxima 중
+      // **가장 작은 r** 채택. 그림자 케이스에서 Hough 가 (실제 rim) + (그림자
+      // boundary edge) 둘 다 동등 강도 vote 받아 더 큰 쪽으로 픽한 회귀 보정.
       //
-      // 단일 peak 만 eligible 이면 mean = 그 단일 r → 다른 그림자 fixture
-      // (shadow-001/002, fail-002) 의 측정값 영향 0 (단일 peak 케이스).
-      // dual peak 케이스 (fail-003: r=143 grad=80, r=153 grad=80) 에서만
-      // mean ~148 로 수렴해 너무 작게 잡힌 회귀 추가 보정.
+      // mean 전략 시도 (커밋 3365910) 후 시각 검증 결과 dual-peak 케이스의 두
+      // peak 사이는 *coin 내부의 metal 면* 이라 mean 값이 실제 rim 이 아닌
+      // 사이 영역에 떨어짐 — 사용자 시각으론 원본 oversized 와 비슷해 보임.
+      // 작은 쪽 peak 가 실제 코인 boundary (smooth metal → textured rim 시작점) 에
+      // 해당해 사용자 시각과 일치하므로 smallest 전략 채택.
       const swStart = Math.max(1, Math.round(initR * 0.9));
       const swEnd = Math.round(initR * 1.1);
       const grads: { r: number; g: number }[] = [];
@@ -812,27 +812,23 @@ export async function detectCoin(
         if (g > peakG) peakG = g;
       }
       const eligibleThreshold = peakG * 0.95;
-      const eligibleMaxima: number[] = [];
+      let bestR: number = initR;
+      // 가장 작은 r 의 eligible local max 선택
       for (let i = 0; i < grads.length; i++) {
         const cand = grads[i];
         if (cand.g < eligibleThreshold) continue;
         const left = i > 0 ? grads[i - 1].g : -Infinity;
         const right = i < grads.length - 1 ? grads[i + 1].g : -Infinity;
         if (cand.g >= left && cand.g >= right) {
-          eligibleMaxima.push(cand.r);
+          bestR = cand.r;
+          break;
         }
       }
-      let bestR: number = initR;
-      if (eligibleMaxima.length > 0) {
-        const meanR =
-          eligibleMaxima.reduce((a, b) => a + b, 0) / eligibleMaxima.length;
-        bestR = meanR;
-      }
       const initGrad = meanRimGradient(grayOriginal, cx, cy, initR);
-      if (Math.abs(bestR - initR) > 0.5) {
-        const bestGrad = meanRimGradient(grayOriginal, cx, cy, bestR);
+      if (bestR !== Math.round(initR)) {
+        const bestGrad = grads.find((x) => x.r === bestR)?.g ?? 0;
         console.log(
-          `[coin-detect] shadow detected → radius refined: ${initR.toFixed(1)} → ${bestR.toFixed(1)} (grad ${initGrad.toFixed(0)} → ${bestGrad.toFixed(0)}, peak=${peakG.toFixed(0)}, eligible=[${eligibleMaxima.join(",")}])`,
+          `[coin-detect] shadow detected → radius refined: ${initR.toFixed(1)} → ${bestR} (grad ${initGrad.toFixed(0)} → ${bestGrad.toFixed(0)}, peak=${peakG.toFixed(0)})`,
         );
       } else {
         bestR = initR; // sub-pixel 보존
