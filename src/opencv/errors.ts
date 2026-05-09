@@ -36,6 +36,18 @@ export type CandidateRejectReason =
 export interface CandidateInfo {
   position: CandidatePosition;
   rejectReason: CandidateRejectReason;
+  /**
+   * **dev-only** 검출 시각화 데이터 — `import.meta.env.DEV` 에서만 UI 노출.
+   * 좌표는 0~1 상대값 (이미지 해상도 독립). production 에서는 채워는 두되 (오버헤드
+   * 미미) 화면 표시 안 함.
+   */
+  debug?: {
+    cxRel: number;
+    cyRel: number;
+    rRel: number;
+    mean: number;
+    rimGradient: number;
+  };
 }
 
 export type AnalysisError =

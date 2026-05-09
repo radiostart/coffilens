@@ -10,6 +10,7 @@ import { DisclaimerBanner } from "../components/disclaimer-banner";
 import { AdBanner } from "../components/ad-banner";
 import { ConfirmModal } from "../components/confirm-modal";
 import { DebugOverlay } from "../components/debug-overlay";
+import { CandidateOverlay } from "../components/candidate-overlay";
 import { SpectrumBar } from "../components/spectrum-bar";
 import { useMeasurementStore } from "../stores/measurement.store";
 import { useHistoryStore } from "../stores/history.store";
@@ -62,6 +63,8 @@ export function ResultRoute() {
   const [showRetakeConfirm, setShowRetakeConfirm] = useState(false);
   // no_coin 진단 — v3 default 노출, "자세히" 클릭 시 v2 (per-candidate) expand.
   const [showDiagDetail, setShowDiagDetail] = useState(false);
+  // **dev-only** no_coin 시 후보 overlay 토글 — `import.meta.env.DEV` 에서만 노출.
+  const [showCandidateOverlay, setShowCandidateOverlay] = useState(false);
   // 개발자용 검출 오버레이 표시 여부 — 기본 OFF (필요할 때 토글로 켬).
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
   const isArchived = archive !== null;
@@ -150,6 +153,34 @@ export function ResultRoute() {
               📊 {details.diagnostics}
             </p>
           )}
+          {/* dev-only: 후보 검출 시각화 — 분석 frame 위에 reject 된 원형 후보 그림. */}
+          {import.meta.env.DEV &&
+            error.kind === "no_coin" &&
+            frame !== null &&
+            details.candidates &&
+            details.candidates.length > 0 && (
+              <section
+                className="result-error-diag-detail"
+                aria-label="검출 결과 시각화 (개발자용)"
+              >
+                <button
+                  type="button"
+                  className="result-error-diag-toggle"
+                  onClick={() => setShowCandidateOverlay((v) => !v)}
+                  aria-expanded={showCandidateOverlay}
+                >
+                  {showCandidateOverlay
+                    ? "검출 결과 닫기 ▲ (DEV)"
+                    : "검출 결과 보기 ▼ (DEV)"}
+                </button>
+                {showCandidateOverlay && (
+                  <CandidateOverlay
+                    frame={frame}
+                    candidates={details.candidates}
+                  />
+                )}
+              </section>
+            )}
           <button
             type="button"
             className="btn-primary"
