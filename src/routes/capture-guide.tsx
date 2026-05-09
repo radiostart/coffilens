@@ -6,12 +6,19 @@ import "./capture-guide.css";
 /**
  * 단계 안내. 동전 step 은 coin-select 에서 선택한 동전을 명시 (2026-05-07).
  * coinType null 이면 fallback 으로 "100원 또는 500원" 표시.
+ *
+ * **숫자 면 위로 (2026-05-09)**: 동전의 그림 면 (100원 이순신 / 500원 학) 은
+ * 깊은 부조 텍스처로 동전 내부 픽셀 stddev 가 ~45 까지 올라가 검출 필터의
+ * `COIN_MAX_STDDEV=42` 임계를 종종 초과 → 진짜 동전이 `coffee_cluster` 로
+ * 오판 reject. 숫자 (한국은행) 면은 텍스트만 있어 stddev ~4-8 로 매우 균일,
+ * 임계 여유 충분. 사용자 가이드로 face 인식 코드 없이 검출 안정성 ↑.
  */
 function buildSteps(coinType: "100" | "500" | null): string[] {
   const coinLabel = coinType === "100" ? "100원" : coinType === "500" ? "500원" : "100원 또는 500원";
   return [
     "흰 종이 위에 분쇄한 원두를 얇게 펴주세요",
     `${coinLabel} 동전을 1개만 같이 놓아주세요`,
+    "동전은 숫자(한국은행) 면이 위로 보이게 놓아주세요",
     "균일한 조명 아래에서 촬영해주세요",
     "동전이 화면 안에 완전히 보이도록 해주세요",
   ];
