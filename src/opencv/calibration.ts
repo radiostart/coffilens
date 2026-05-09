@@ -23,48 +23,7 @@
  * 사용자/그라인더별 임계값 튜닝은 이 layer 에서만 일어나야 한다. 가이드
  * 임계값은 외부 표준을 따르는 게 원칙 (우리가 정할 문제가 아님).
  *
- * **Anchor — Varia VS3 + Hyperhoba burr @ 11 (pour-over 우선 정책)**
- *
- * **2026-05-02 후속 수정**: tune-pipeline.ts EXIF 버그 발견. sharp.metadata()
- * 가 pre-rotate 차원 반환 → resize cover-fit 으로 portrait 사진 상하단 잘림 →
- * 코인 위치 잘려 HoughCircles false-positive (큰 phantom circle) 잡음 →
- * mmPerPixel 부정확 (실제보다 작게 측정) → image D50 도 부정확.
- *
- * 브라우저 (real <img>+canvas, EXIF 정상 처리) 측정 결과로 재보정:
- *
- *   Setting 11 (V60 pour-over) — fixture test-vs3-11.jpg
- *     - browser: coin r=77 (정확), mmPerPx = 0.172
- *     - browser: image D50 ≈ 414μm
- *     - sieve target: V60 표준 700μm
- *     - ratio = 700 / 414 ≈ **1.69** → **1.7** 으로 round
- *
- * 이전 ratio 3.3 (구 tune-pipeline 의 r=298 false positive 기반) 은 invalid.
- * 다른 fixture (5.1, 9, 13) 의 manifest observed 데이터도 동일 버그 영향 →
- * Phase 2 에서 브라우저 측정으로 재검증 필요.
- *
- * **정책: 핸드드립 우선 anchor (사용자 결정 2026-05-02)**
- *  - 핸드드립이 가장 일반적 추출법 → 정확도 우선
- *  - Setting 11 (V60 pour-over) 브라우저 측정 anchor
- *  - 다른 grind 영역은 brewing-guide 의 3-카테고리 단순화 (fine/medium/coarse) 와
- *    measurement confidence 표시로 대응 (camera distance 가까울수록 신뢰도 ↑)
- *
- * **Phase 2 TODO**
- *  - 사용자 sieve 분급된 ground-truth fixture 로 정밀 보정
- *  - 다른 setting (5.1, 9, 13) 브라우저 재측정으로 4-anchor 재구성
- *  - mmPerPixel-aware 적응형 ratio (선형 회귀)
- *  - Sub-pixel 입자 추정 (해상도 한계 극복)
- *  - coin detection filter 완화 (|int-ext| 70 임계가 일부 동전 false reject)
- */
-
-import type { ParticleStats } from "./statistics";
-import calibrationData from "./calibration-data.json";
-
-/**
- * Image-measured 직경에 곱하면 sieve-equivalent 직경이 나오는 *기본* 비율.
- *
- * **2026-05-05 재anchor**: D-값 계산을 count-percentile → volume-weighted percentile
- * 로 전환 (statistics.ts). 산업 표준 (Malvern D[v,0.5], sieve mass-weighted) 일치
- * 정책. count → volume 으로 D50 자체 값이 ~2.7x 커짐 (V60 anchor 414 → 1110).
+ * **Anchor — Varia VS3 + Hyperhoba burr @ 11 (V60 pour-over)**
  *
  * Setting 11 (V60 pour-over) — fixtures/test-vs3-11.jpg, 브라우저 anchor:
  *   - mmPerPx = 0.170 (정확)
@@ -72,68 +31,28 @@ import calibrationData from "./calibration-data.json";
  *   - sieve target: V60 표준 700μm
  *   - ratio = 700 / 1110 ≈ **0.63**
  *
- * 이 값은 calibration-data.json 의 `defaultRatio` 와 동기화돼야 한다 — anchor
- * 비어있을 때 fallback. anchor 등록 시 grind-size-aware 보간이 우선 사용됨.
+ * **2026-05-05 재anchor (volume-weighted 전환)**: D-값 계산을 count-percentile
+ * → volume-weighted percentile 로 전환 (statistics.ts). 산업 표준 (Malvern
+ * D[v,0.5], sieve mass-weighted) 일치 정책. count → volume 으로 D50 자체 값이
+ * ~2.7x 커짐 (V60 anchor 414 → 1110), ratio 1.7 → 0.63 으로 재산출.
+ *
+ * **Phase 2 TODO**
+ *  - 사용자 sieve 분급된 ground-truth fixture 로 정밀 보정 (grind-size-aware ratio)
+ *  - 다른 setting (5.1, 9, 13) 브라우저 재측정으로 multi-anchor 재구성
+ *  - mmPerPixel-aware 적응형 ratio (선형 회귀)
+ *  - Sub-pixel 입자 추정 (해상도 한계 극복)
+ *  - coin detection filter 완화 (|int-ext| 70 임계가 일부 동전 false reject)
+ */
+
+import type { ParticleStats } from "./statistics";
+
+/**
+ * Image-measured 직경에 곱하면 sieve-equivalent 직경이 나오는 비율.
+ *
+ * Setting 11 (V60 pour-over) brower-measured anchor 기반 단일 상수 (0.63).
+ * grind-size-aware multi-anchor 보간은 sieve ground-truth 데이터 확보 시 도입.
  */
 export const IMAGE_TO_SIEVE_RATIO = 0.63;
-
-/**
- * **Calibration anchor** — sieve 분급 ground-truth 와 image 측정값 페어.
- *
- *   ratio_at_anchor = targetD50um / rawD50um
- *
- * grind 마다 image → sieve 비율이 다른 게 관찰됨 (manifest 의 0.59~0.88 spread):
- *  - fine grind: 입자 fragment over-segmentation 이 심해 image 가 더 작게 측정 → ratio 큼
- *  - coarse grind: 큰 입자는 fragment 거의 없어 image ≈ sieve → ratio 1 가까움
- *
- * 다중 anchor 등록 시 raw D50 기준 선형 보간으로 grind-size-aware ratio 산출.
- */
-interface CalibrationAnchor {
-  label: string;
-  rawD50um: number;
-  targetD50um: number;
-  notes?: string;
-}
-
-interface CalibrationConfig {
-  version: number;
-  defaultRatio: number;
-  anchors: CalibrationAnchor[];
-}
-
-const config = calibrationData as unknown as CalibrationConfig;
-
-/**
- * Raw image D50 에 대응하는 calibration ratio 산출.
- *
- *  - anchor 0 개: defaultRatio (= 2026-05-05 baseline ratio 0.63)
- *  - anchor 1 개: 그 anchor 의 ratio (grind-size 무관 평면)
- *  - anchor ≥ 2 개: rawD50 기준 선형 보간. 양 끝 밖이면 가장 가까운 anchor 의 ratio
- *    로 *clamp* (extrapolation 위험 차단 — 실측 안 된 영역에서 ratio 추정은 위험).
- *
- * 결정론적 — 같은 rawD50 입력은 항상 같은 ratio.
- */
-export function getCalibrationRatio(rawD50um: number): number {
-  const { anchors, defaultRatio } = config;
-  if (anchors.length === 0) return defaultRatio;
-  const sorted = [...anchors].sort((a, b) => a.rawD50um - b.rawD50um);
-  const ratioOf = (a: CalibrationAnchor) => a.targetD50um / a.rawD50um;
-  if (sorted.length === 1) return ratioOf(sorted[0]);
-  // clamp at endpoints — extrapolation 안 함
-  if (rawD50um <= sorted[0].rawD50um) return ratioOf(sorted[0]);
-  const last = sorted[sorted.length - 1];
-  if (rawD50um >= last.rawD50um) return ratioOf(last);
-  // 선형 보간 — rawD50 가 어느 anchor 구간에 들어가는지 찾아 두 ratio 사이 보간
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const lo = sorted[i];
-    const hi = sorted[i + 1];
-    if (rawD50um >= lo.rawD50um && rawD50um <= hi.rawD50um) {
-      const t = (rawD50um - lo.rawD50um) / (hi.rawD50um - lo.rawD50um);
-      return ratioOf(lo) + t * (ratioOf(hi) - ratioOf(lo));
-    }
-  }
-  return defaultRatio; // unreachable — 이론적 가드
-}
 
 /**
  * computeStats 출력에 image → sieve 변환 적용.
@@ -151,15 +70,12 @@ export function getCalibrationRatio(rawD50um: number): number {
  *    metric 이므로 변환하지 않음.
  *  - clumps.areaRatio: 면적 비율 (%) → invariant.
  *
- * **ratio 결정**: input 의 raw d50 으로 grind-size-aware ratio 조회. anchor
- * 미등록 (default) 시 0.63 으로 polynomial degeneration → 기존 동작과 동일.
- *
  * 새 ParticleStats 객체 반환 (input 불변).
  */
 export function applyImageToSieveCalibration(
   stats: ParticleStats,
 ): ParticleStats {
-  const r = getCalibrationRatio(stats.d50);
+  const r = IMAGE_TO_SIEVE_RATIO;
   return {
     ...stats,
     d10: stats.d10 * r,
@@ -171,6 +87,4 @@ export function applyImageToSieveCalibration(
 
 export const _internal = {
   IMAGE_TO_SIEVE_RATIO,
-  getCalibrationRatio,
-  config,
 };
