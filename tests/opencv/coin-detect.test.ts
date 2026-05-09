@@ -230,23 +230,43 @@ describe("detectCoin — 분기 동작", () => {
     expect(result.mmPerPixel).toBeLessThan(0.3);
   });
 
-  it("hint 와 후보 거리 > r * 1.5 → no_coin (hint_too_far)", async () => {
-    // 014 회귀: HoughCircles 가 phantom 만 잡고 진짜 동전 누락. 사용자 hint 는
-    // 진짜 동전 위치(0.9, 0.7) 인데 phantom 이 (200, 200) r=80 → dist=843px,
-    // 한도 80*1.5=120px 초과 → "가장 가까운 후보" 라도 거절되어야 함.
-    setupCvMock({ circles: [200, 200, 80], imgRows: 1280, imgCols: 720 });
-    await expect(
-      detectCoin(fakeCanvas(), "500", { x: 0.9, y: 0.7 }),
-    ).rejects.toMatchObject({ kind: "no_coin" });
+  it("hint 제공 시 Hough 바이패스 (tap-based 1D radius sweep) — HoughCircles 미호출", async () => {
+    // 새 dispatch (2026-05-09): hint 있으면 detectCoinFromHint 로 위임,
+    // Hough 의 3D 탐색 우회. cv.HoughCircles 호출 안 됨이 핵심 검증.
+    const { cv } = setupCvMock({
+      circles: [],
+      imgRows: 1280,
+      imgCols: 720,
+    });
+    try {
+      await detectCoin(fakeCanvas(), "500", { x: 0.5, y: 0.5 });
+    } catch {
+      // 결과는 mock 데이터 의존 — 여기선 dispatch 만 검증
+    }
+    expect(cv.HoughCircles).not.toHaveBeenCalled();
   });
 
-  it("hint 가 후보 안쪽 (dist < r) → 정상 선택", async () => {
-    // 후보 r=80 @ (360, 640). hint 가 (0.5, 0.5) → 픽셀 (360, 640) — 정확히 중심.
-    // dist=0 < 120 (=80*1.5) → 통과.
-    setupCvMock({ circles: [360, 640, 80], imgRows: 1280, imgCols: 720 });
+  it("hint 없으면 Hough 경로 — HoughCircles 호출됨", async () => {
+    const { cv } = setupCvMock({
+      circles: [360, 640, 80],
+      imgRows: 1280,
+      imgCols: 720,
+    });
+    await detectCoin(fakeCanvas(), "500"); // hint 미지정
+    expect(cv.HoughCircles).toHaveBeenCalled();
+  });
+
+  it("hint 정상 + sweep 으로 r 찾기 — 합리 mmPerPixel 반환", async () => {
+    // mock 의 uniform stripe 데이터 → meanRimGradient 가 r 마다 비슷한 값.
+    // 1D sweep peak 위치는 stripe 주기성 의존 — 정확한 r 은 deterministic
+    // 이지만 fixture 회귀 테스트로 검증, 여기선 합리 범위만.
+    setupCvMock({ imgRows: 1280, imgCols: 720 });
     const result = await detectCoin(fakeCanvas(), "500", { x: 0.5, y: 0.5 });
-    expect(result.centerX).toBe(360);
-    expect(result.radiusPx).toBe(80);
+    expect(result.centerX).toBeCloseTo(360, 0);
+    expect(result.centerY).toBeCloseTo(640, 0);
+    expect(result.radiusPx).toBeGreaterThan(0);
+    expect(result.coinType).toBe("500");
+    expect(result.mmPerPixel).toBeGreaterThan(0);
   });
 });
 
