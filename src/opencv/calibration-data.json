@@ -1,0 +1,7 @@
+{
+  "$schema": "calibration-data.schema (see calibration.ts)",
+  "version": 1,
+  "defaultRatio": 0.63,
+  "anchors": [],
+  "_doc": "사용자 sieve 분급 ground truth 등록 — docs/sieve-calibration.md 참조. anchors 비어있으면 defaultRatio 적용 (= 2026-05-05 baseline 동작 보존)."
+}
