@@ -184,6 +184,29 @@ const COIN_GRADIENT_STRONG_BYPASS = 50;
 //   napkin 구멍/scattered coffee 가장자리: ~5-15
 const COIN_MIN_RIM_GRADIENT = 18;
 
+// Stddev strong-bypass cap (2026-05-09) — 학 면 / 이순신 면 (textured 부조) 의
+// 동전 face design 으로 stddev 가 ~45 까지 올라가 COIN_MAX_STDDEV=42 임계를
+// 초과해 진짜 동전이 coffee_cluster 로 오판 reject 되는 회귀 차단.
+//
+// 사용자 가이드 (capture-guide: "숫자 면 위") 가 1차 방어, 코드 bypass 가 2차
+// 방어 (사용자가 학 면 위로 둔 사진의 backup).
+//
+// 메커니즘: rim gradient ≥ COIN_GRADIENT_STRONG_BYPASS (=50, sharp metal edge =
+// 진짜 동전 신호) AND stddev ≤ 55 인 경우만 coffee_cluster 임계 우회. 즉
+// 진짜 metal rim 신호가 충분히 강할 때만 stddev 관용 부여 — 약한 rim 의
+// 그림자 boundary / napkin texture 는 여전히 reject.
+//
+// **cap 55 의 결정 근거** (현 fixture 데이터):
+//   진짜 동전 학 면 stddev: 45 (test-vs3-051)
+//   거짓 양성 위험 가장 높은 케이스: test-vs3-multi 커피 cluster
+//     (stddev 59, grad 53) — cap 55 미만이라 safe margin 4 px stddev
+//   다른 커피 cluster: 대부분 grad < 50 라 bypass 자체 적용 안 됨
+//
+// **회귀 검증** (batch-analyze, 2026-05-09):
+//   전 baseline fixture 7/7 byte-identical (변경 없음 — 통과 후보들이 stddev<42
+//   이므로 bypass 무관).
+const COIN_MAX_STDDEV_RELAXED = 55;
+
 // `meanIntensityRingOutside` 가 ring 픽셀 부족(이미지 경계 벗어남) 시 반환하는
 // "exterior 측정 불가" sentinel. 이 값이면 |int-ext| 검증을 통과시킨다.
 const EXTERIOR_SENTINEL_NONE = 999;
@@ -391,7 +414,14 @@ function deriveRejectReason(
     return "too_dark";
   }
   if (c.mean > COIN_MAX_MEAN_INTENSITY) return "too_bright";
-  if (c.stddev > COIN_MAX_STDDEV) return "coffee_cluster";
+  // stddev strong-bypass: 진짜 동전 face (학/이순신 부조) 의 stddev~45 회복.
+  // grad ≥ bypassGrad AND stddev ≤ COIN_MAX_STDDEV_RELAXED 일 때만 임계 우회.
+  if (
+    c.stddev > COIN_MAX_STDDEV &&
+    (c.rimGradient < bypassGrad || c.stddev > COIN_MAX_STDDEV_RELAXED)
+  ) {
+    return "coffee_cluster";
+  }
   if (
     c.exterior !== EXTERIOR_SENTINEL_NONE &&
     c.rimGradient < bypassGrad &&
