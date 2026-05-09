@@ -46,11 +46,20 @@ declare const cv: {
   Mat: new (...args: unknown[]) => CvMat;
   MatVector: new (...args: unknown[]) => CvMat;
   Size: new (width: number, height: number) => { width: number; height: number };
+  CLAHE: new (
+    clipLimit?: number,
+    tileGridSize?: { width: number; height: number },
+  ) => CvCLAHE;
   COLOR_RGBA2GRAY: number;
   HOUGH_GRADIENT: number;
   CV_64F: number;
   CV_8U: number;
 };
+
+interface CvCLAHE {
+  apply: (src: CvMat, dst: CvMat) => void;
+  delete: () => void;
+}
 
 interface CvMat {
   delete: () => void;
@@ -367,21 +376,32 @@ interface AnnotatedCircle {
 }
 
 /**
+ * **CLAHE retry bypass relaxation (2026-05-09)**: baseline 에서 0 candidate 였던
+ * 사진은 그림자 등으로 grayOriginal 의 rim gradient 자체가 약함. CLAHE 가 코인
+ * 위치는 정확히 찾았지만 (Hough 통과) grayOriginal grad 측정이 strong-bypass
+ * 50 못 넘는 경우 → 한 끗 차이로 too_dark/low_contrast reject. retry 한정
+ * 35 로 완화 (정상 케이스 영향 0 — baseline 통과 사진은 retry 자체가 안 일어남).
+ *
+ * fixture 검증 (fail-002.jpeg, 2026-05-09): CLAHE 후 r=153 grad=45 → 35 임계로 PASS.
+ */
+const COIN_GRADIENT_STRONG_BYPASS_RELAXED = 35;
+
+/**
  * 후보 원이 동전 filter 를 통과했는지 — 통과하면 null, fail 하면 첫 fail 이유.
  * `coinCandidates` filter 와 `no_coin` 진단 candidate 분류가 동일 ladder 를 공유.
  */
-function deriveRejectReason(c: AnnotatedCircle): CandidateRejectReason | null {
-  if (
-    c.mean < COIN_MIN_MEAN_INTENSITY &&
-    c.rimGradient < COIN_GRADIENT_STRONG_BYPASS
-  ) {
+function deriveRejectReason(
+  c: AnnotatedCircle,
+  bypassGrad: number = COIN_GRADIENT_STRONG_BYPASS,
+): CandidateRejectReason | null {
+  if (c.mean < COIN_MIN_MEAN_INTENSITY && c.rimGradient < bypassGrad) {
     return "too_dark";
   }
   if (c.mean > COIN_MAX_MEAN_INTENSITY) return "too_bright";
   if (c.stddev > COIN_MAX_STDDEV) return "coffee_cluster";
   if (
     c.exterior !== EXTERIOR_SENTINEL_NONE &&
-    c.rimGradient < COIN_GRADIENT_STRONG_BYPASS &&
+    c.rimGradient < bypassGrad &&
     Math.abs(c.mean - c.exterior) > COIN_MAX_INTERIOR_EXTERIOR_DIFF
   ) {
     return "low_contrast";
@@ -464,49 +484,148 @@ export async function detectCoin(
     const photoMean = cv.mean(gray)[0];
     const gamma = chooseGamma(photoMean);
 
-    const coinDetectGray = scope.track(new cv.Mat());
+    // coinDetectGray 빌더 — 1차는 CLAHE off (baseline 동작 보존), 0 candidate
+    // 시 CLAHE on 으로 재시도 (그림자 fallback). primary path 에 CLAHE 항상
+    // 적용은 marginal-pass 케이스 (mean<110 + grad≥50 strong-bypass) 를
+    // 깨뜨림 — Hough 가 다른 원을 찾고 rim gradient 가 약해져 too_dark reject.
+    // 검증: shadow-001.jpeg (2026-05-08) baseline PASS, primary-CLAHE FAIL.
+    function buildCoinDetectGray(useClahe: boolean): CvMat {
+      const dst = scope.track(new cv.Mat());
+      let source: CvMat = gray;
+      if (gamma < 1.0) {
+        const lifted = scope.track(new cv.Mat());
+        applyGamma(gray, lifted, gamma);
+        source = lifted;
+      }
+      if (useClahe) {
+        const clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
+        const equalized = scope.track(new cv.Mat());
+        try {
+          clahe.apply(source, equalized);
+        } finally {
+          clahe.delete();
+        }
+        cv.GaussianBlur(
+          equalized,
+          dst,
+          new cv.Size(blurKernel, blurKernel),
+          0,
+        );
+      } else {
+        cv.GaussianBlur(
+          source,
+          dst,
+          new cv.Size(blurKernel, blurKernel),
+          0,
+        );
+      }
+      return dst;
+    }
+
     if (gamma < 1.0) {
-      const lifted = scope.track(new cv.Mat());
-      applyGamma(gray, lifted, gamma);
-      cv.GaussianBlur(
-        lifted,
-        coinDetectGray,
-        new cv.Size(blurKernel, blurKernel),
-        0,
-      );
       console.log(
         `[coin-detect] dark photo (mean=${photoMean.toFixed(0)}) → γ=${gamma.toFixed(2)} lift on HoughCircles input only`,
       );
-    } else {
-      cv.GaussianBlur(
-        gray,
-        coinDetectGray,
-        new cv.Size(blurKernel, blurKernel),
-        0,
-      );
     }
 
-    const circles = scope.track(new cv.Mat());
-    cv.HoughCircles(
-      coinDetectGray,
-      circles,
-      cv.HOUGH_GRADIENT,
-      1, // dp
-      gray.rows / 3, // minDist
-      100, // param1 (Canny 상위 임계)
-      50, // param2 (검출 임계)
-      Math.round(gray.rows * 0.05), // minRadius (이미지 5%)
-      Math.round(gray.rows * 0.4), // maxRadius (이미지 40%)
-    );
+    type AnnotatedWithReason = AnnotatedCircle & {
+      reason: CandidateRejectReason | null;
+    };
 
-    const numCircles = circles.cols;
+    function runDetectionPass(useClahe: boolean): {
+      numCircles: number;
+      annotated: AnnotatedWithReason[];
+      candidates: AnnotatedWithReason[];
+    } {
+      const cdg = buildCoinDetectGray(useClahe);
+      const circles = scope.track(new cv.Mat());
+      cv.HoughCircles(
+        cdg,
+        circles,
+        cv.HOUGH_GRADIENT,
+        1, // dp
+        gray.rows / 3, // minDist
+        100, // param1 (Canny 상위 임계)
+        50, // param2 (검출 임계)
+        Math.round(gray.rows * 0.05), // minRadius (이미지 5%)
+        Math.round(gray.rows * 0.4), // maxRadius (이미지 40%)
+      );
+      const numCircles = circles.cols;
+      const tag = useClahe ? "[CLAHE]" : "";
+      if (numCircles === 0) {
+        console.log(`[coin-detect]${tag} HoughCircles found 0 circles`);
+        return { numCircles, annotated: [], candidates: [] };
+      }
+      const sortedCircles: Array<{ cx: number; cy: number; r: number }> = [];
+      for (let i = 0; i < numCircles; i++) {
+        sortedCircles.push({
+          cx: circles.data32F[i * 3],
+          cy: circles.data32F[i * 3 + 1],
+          r: circles.data32F[i * 3 + 2],
+        });
+      }
+      sortedCircles.sort((a, b) => b.r - a.r);
 
-    if (numCircles === 0) {
+      const bypassGrad = useClahe
+        ? COIN_GRADIENT_STRONG_BYPASS_RELAXED
+        : COIN_GRADIENT_STRONG_BYPASS;
+      const ann: AnnotatedWithReason[] = sortedCircles.map((c) => {
+        const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
+        const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
+        const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
+        const enriched = { ...c, ...interior, exterior, rimGradient };
+        return { ...enriched, reason: deriveRejectReason(enriched, bypassGrad) };
+      });
+      console.log(
+        `[coin-detect]${tag} all circles:`,
+        ann
+          .map(
+            (c) =>
+              `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) i=${c.mean.toFixed(0)}±${c.stddev.toFixed(0)} ext=${c.exterior.toFixed(0)} grad=${c.rimGradient.toFixed(0)}`,
+          )
+          .join(" | "),
+      );
+      const cands = ann.filter((c) => c.reason === null);
+      console.log(
+        `[coin-detect]${tag} coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}] OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${cands.length}`,
+      );
+      console.log(
+        `[coin-detect]${tag} reasons:`,
+        ann
+          .map((c) => `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) → ${c.reason ?? "PASS"}`)
+          .join(" | "),
+      );
+      return { numCircles, annotated: ann, candidates: cands };
+    }
+
+    // **CLAHE fallback (2026-05-08)**: 1차 시도는 baseline (CLAHE 없음). 0
+    // candidate 일 때만 CLAHE 적용해 재시도. primary 에 CLAHE 항상 적용은
+    // marginal-pass 케이스 (mean<110, grad≥50 strong-bypass) 에서 Hough 가
+    // 다른 원을 찾고 rim gradient 가 약해져 too_dark reject — 검증된 회귀.
+    // fallback 패턴은 작동하던 사진에 영향 0, 실패 사진에 escape hatch 만 추가.
+    let pass = runDetectionPass(false);
+    if (pass.candidates.length === 0) {
+      console.log(
+        `[coin-detect] no candidates on baseline (numCircles=${pass.numCircles}) → retrying with CLAHE fallback`,
+      );
+      const claheRetry = runDetectionPass(true);
+      // CLAHE 시도가 후보를 만들었으면 그쪽 채택. 둘 다 0 이면 baseline 정보
+      // (annotated, candidates) 보존해 no_coin 진단에 사용.
+      if (claheRetry.candidates.length > 0) {
+        pass = claheRetry;
+      } else if (pass.numCircles === 0 && claheRetry.numCircles > 0) {
+        // baseline 0 circles 였는데 CLAHE 가 circles (전부 reject) 라도 만들었으면
+        // 사용자 진단 정보 더 풍부 → annotated 채택.
+        pass = claheRetry;
+      }
+    }
+
+    const annotated = pass.annotated;
+    const coinCandidates = pass.candidates;
+
+    if (pass.numCircles === 0) {
       // **Edge-arc probe (2026-05-05)**: HoughCircles 가 0 circle 반환한 경우,
       // 동전이 프레임 가장자리로 잘려서 full circle 인식 실패한 케이스 일 수 있음.
-      // regression batch (n=14) 에서 4장 fail 모두 edge-clip 케이스. probe 가
-      // 가장자리 닿은 arc 를 찾으면 partial_coin 으로 명시 분기 → UI 가 "동전이
-      // 잘렸어요" 안내 (vs. "동전이 보이지 않아요").
       const arcHit = probePartialCoinAtEdges(gray, scope);
       if (arcHit) {
         console.log(
@@ -517,54 +636,8 @@ export async function detectCoin(
       throw { kind: "no_coin" } satisfies AnalysisError;
     }
 
-    // 검출된 원들을 radius 내림차순 정렬 (data32F: [cx0, cy0, r0, cx1, cy1, r1, ...])
-    const sortedCircles: Array<{ cx: number; cy: number; r: number }> = [];
-    for (let i = 0; i < numCircles; i++) {
-      sortedCircles.push({
-        cx: circles.data32F[i * 3],
-        cy: circles.data32F[i * 3 + 1],
-        r: circles.data32F[i * 3 + 2],
-      });
-    }
-    sortedCircles.sort((a, b) => b.r - a.r);
-
-    // 모든 후보의 intensity/exterior/rim gradient 계산 — hint 유무 관계없이
-    // 동일하게 검증 (정확도 우선). 사용자 보고: 필터 skip 시 phantom 가까이
-    // 있으면 잘못된 동전 선택 → 분쇄도 측정 1.3배 부풀림 회귀.
-    const annotated: Array<AnnotatedCircle & { reason: CandidateRejectReason | null }> =
-      sortedCircles.map((c) => {
-        const interior = intensityStatsInCircle(gray, c.cx, c.cy, c.r);
-        const exterior = meanIntensityRingOutside(gray, c.cx, c.cy, c.r);
-        const rimGradient = meanRimGradient(grayOriginal, c.cx, c.cy, c.r);
-        const enriched = { ...c, ...interior, exterior, rimGradient };
-        return { ...enriched, reason: deriveRejectReason(enriched) };
-      });
-    console.log(
-      "[coin-detect] all circles:",
-      annotated
-        .map(
-          (c) =>
-            `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) i=${c.mean.toFixed(0)}±${c.stddev.toFixed(0)} ext=${c.exterior.toFixed(0)} grad=${c.rimGradient.toFixed(0)}`,
-        )
-        .join(" | "),
-    );
-
-    const coinCandidates = annotated.filter((c) => c.reason === null);
-    console.log(
-      `[coin-detect] coin candidates after filter (mean [${COIN_MIN_MEAN_INTENSITY}..${COIN_MAX_MEAN_INTENSITY}] OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, stddev≤${COIN_MAX_STDDEV}, |int-ext|≤${COIN_MAX_INTERIOR_EXTERIOR_DIFF} OR grad≥${COIN_GRADIENT_STRONG_BYPASS}, gradient≥${COIN_MIN_RIM_GRADIENT}): ${coinCandidates.length}`,
-    );
-    console.log(
-      "[coin-detect] reasons:",
-      annotated
-        .map((c) => `r=${c.r.toFixed(0)}@(${c.cx.toFixed(0)},${c.cy.toFixed(0)}) → ${c.reason ?? "PASS"}`)
-        .join(" | "),
-    );
-
     if (coinCandidates.length === 0) {
-      // **Edge-arc probe (2026-05-05)**: HoughCircles 가 후보를 찾았지만 모두
-      // reject 된 경우에도 partial coin 가능성 검사. regression 사례: 동전이
-      // 가장자리 잘림 → HoughCircles 가 그림자/배경을 1개 후보로 잡고 그건
-      // reject (too_dark) → 실제 coin 은 arc 만 보여 무시됨.
+      // **Edge-arc probe**: HoughCircles 가 후보를 찾았지만 모두 reject 된 경우.
       const arcHit = probePartialCoinAtEdges(gray, scope);
       if (arcHit) {
         console.log(
@@ -572,8 +645,6 @@ export async function detectCoin(
         );
         throw { kind: "partial_coin" } satisfies AnalysisError;
       }
-      // 검출된 모든 원형 후보 + 각 reject 이유 + 위치 라벨 → no_coin 에러에 첨부.
-      // UI 가 v3 패턴 요약 / v2 자세히 expand 로 노출.
       const candidates: CandidateInfo[] = annotated
         .filter((c): c is typeof c & { reason: CandidateRejectReason } =>
           c.reason !== null,

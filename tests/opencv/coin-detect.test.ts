@@ -33,6 +33,7 @@ interface MockCv {
   Mat: ReturnType<typeof vi.fn>;
   MatVector: ReturnType<typeof vi.fn>;
   Size: ReturnType<typeof vi.fn>;
+  CLAHE: ReturnType<typeof vi.fn>;
   COLOR_RGBA2GRAY: number;
   HOUGH_GRADIENT: number;
   CV_64F: number;
@@ -92,19 +93,25 @@ function setupCvMock(opts: {
     data64F: new Float64Array([opts.stddev ?? 100]),
   });
 
-  // detectCoin 의 new cv.Mat() 순서 (2026-05-02 변경 후):
+  // detectCoin 의 new cv.Mat() 순서 (2026-05-08 CLAHE fallback 후):
   //   1. grayOriginal (sharp edge 보존, gradient 측정용)
   //   2. gray (median blur 적용, intensity stats 용)
-  //   3. coinDetectGray (Gaussian 15x15 추가 적용, HoughCircles 입력 — 속도 ↑)
-  //   4. circles (HoughCircles 출력)
-  // checkInputQuality 도 별도 cv.Mat 호출 — 그 외 5-6번째 위치
+  //   3. coinDetectGray pass 1 (CLAHE off — baseline)
+  //   4. circles pass 1 (HoughCircles 출력)
+  //   5. coinDetectGray pass 2 (CLAHE on — 0 candidate fallback)
+  //   6. equalized (CLAHE 결과 — pass 2 만)
+  //   7. circles pass 2 (CLAHE 후 HoughCircles 출력)
+  // 비검출 경로에서만 5-7 사용. partial-coin-probe Mat 도 그 뒤로 cycle.
   const grayOriginalMat = makeMat({ rows: imgRows, cols: imgCols });
   let matCount = 0;
   const matInstances = [
     grayOriginalMat,
     grayMat,
-    grayMat, // coinDetectGray (blur 적용 후이지만 동일 차원 → grayMat 재사용 OK)
+    grayMat, // coinDetectGray pass 1 (blur 적용 후이지만 동일 차원 → grayMat 재사용 OK)
     circlesMat,
+    grayMat, // coinDetectGray pass 2 (CLAHE retry)
+    grayMat, // equalized pass 2
+    circlesMat, // circles pass 2 (재시도도 동일 cols → no_coin 분기 보존)
     makeMat(),
     makeMat(),
     stddevMat,
@@ -141,6 +148,13 @@ function setupCvMock(opts: {
     }) as unknown as ReturnType<typeof vi.fn>,
     Size: vi.fn(function MockSize(w: number, h: number) {
       return { width: w, height: h };
+    }) as unknown as ReturnType<typeof vi.fn>,
+    // CLAHE stub — fallback retry path 가 호출. apply 는 no-op (gray 그대로 흘림).
+    CLAHE: vi.fn(function MockCLAHE() {
+      return {
+        apply: vi.fn(),
+        delete: vi.fn(),
+      };
     }) as unknown as ReturnType<typeof vi.fn>,
     COLOR_RGBA2GRAY: 0,
     HOUGH_GRADIENT: 0,
