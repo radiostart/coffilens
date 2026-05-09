@@ -313,6 +313,7 @@ function meanRimGradient(
   return count > 0 ? sum / count : 0;
 }
 
+
 /**
  * 원 외곽 ring (반경 r 부터 r*1.25 까지) 의 평균 grayscale 측정.
  * 진짜 동전: napkin 위에 놓임 → ring 외부도 밝음 (~napkin 색)
@@ -427,23 +428,14 @@ function derivePosition(
 }
 
 /**
- * **Tap-based 동전 검출 (2026-05-09)**: 사용자가 탭한 위치를 코인 *중심* 으로
- * 신뢰하고, 그 중심에서 radius 만 1D sweep 으로 찾음. Hough 의 3D 탐색
- * 공간 (cx, cy, r) 을 1D (r) 로 축소해 *그림자 boundary edge* 가 phantom
- * circle 만드는 회귀 차단 — 직선 그림자 edge 는 고정 중심 기준 circle 의
- * rim gradient 평균에 약하게 기여, 진짜 metal-paper rim 만 강한 peak.
+ * **Tap-based 동전 검출 (ROI Hough, 2026-05-09)**: 사용자 탭 주변 ROI 만
+ * crop 후 Hough 의 3D voting 사용. 전체 이미지 Hough 의 그림자 boundary
+ * phantom circle 회귀가 ROI 밖이라 차단되고, 1D sweep 의 약점 (500원 코인
+ * 내부 동심 feature — 학 그림 + "한국은행" ring — 이 외곽 rim 보다 강하게
+ * 잡히는 회귀) 은 Hough vote 누적이 *완전한 외곽 rim* 을 우세하게 잡아 회피.
  *
- * 흐름:
- *  1. hint 의 (cx, cy) px 좌표 변환 (hint 는 0~1 상대값)
- *  2. r ∈ [rows*0.05, rows*0.4] 1px step sweep, meanRimGradient peak 위치 채택
- *  3. 같은 reject filter 통과 검증 (mean/stddev/exterior/grad)
- *  4. partial_coin 검사 (hint 케이스는 경고만)
- *
- * Hough 와 비교한 장단점:
- *  - 장점: 그림자 boundary 회귀 0, multi_coin 가능성 0 (사용자 명시),
- *    deterministic, 빠름 (O(maxR-minR) ≈ 500 회 연산)
- *  - 단점: 사용자 탭 부정확 시 rim 비대칭 → r 약간 틀림. 다만 코인 중심
- *    탭 정확도는 사용자가 ±5px 안으로 가능 → r 영향 1~2px 수준.
+ * 사용자 탭 부정확 (±50px) 도 ROI 안에서 Hough 가 자동 보정 — 1D sweep
+ * 처럼 hint 위치를 그대로 center 로 강제하지 않음.
  */
 async function detectCoinFromHint(
   canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -458,63 +450,118 @@ async function detectCoinFromHint(
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     cv.medianBlur(gray, gray, 7);
 
-    const cx = hint.x * gray.cols;
-    const cy = hint.y * gray.rows;
+    const cxHint = hint.x * gray.cols;
+    const cyHint = hint.y * gray.rows;
 
-    // r sweep — Hough minRadius/maxRadius 와 동일 범위
-    const minR = Math.max(1, Math.round(gray.rows * 0.05));
-    const maxR = Math.round(gray.rows * 0.4);
-    let bestR = 0;
-    let bestGrad = 0;
-    for (let r = minR; r <= maxR; r++) {
-      const g = meanRimGradient(grayOriginal, cx, cy, r);
-      if (g > bestGrad) {
-        bestGrad = g;
-        bestR = r;
+    // ROI: 800×800 box 중심 hint, image 작으면 image 절반.
+    const ROI_HALF = Math.min(
+      400,
+      Math.floor(Math.min(gray.rows, gray.cols) / 2),
+    );
+    const x0 = Math.max(0, Math.round(cxHint - ROI_HALF));
+    const y0 = Math.max(0, Math.round(cyHint - ROI_HALF));
+    const w = Math.min(gray.cols - x0, ROI_HALF * 2);
+    const h = Math.min(gray.rows - y0, ROI_HALF * 2);
+
+    // ROI 직접 복사 (Mat.roi typing 회피, 800×800 = 640K read, ms 단위).
+    // eslint-disable-next-line local/no-direct-mat -- ROI Mat: scope.track 으로 추적, lifetime 동일
+    const roiBlurred = scope.track(new cv.Mat(h, w, cv.CV_8U));
+    for (let y = 0; y < h; y++) {
+      const srcRow = (y0 + y) * gray.cols;
+      const dstRow = y * w;
+      for (let x = 0; x < w; x++) {
+        roiBlurred.data[dstRow + x] = gray.data[srcRow + x0 + x];
       }
     }
-    console.log(
-      `[coin-detect][tap] hint=(${cx.toFixed(0)},${cy.toFixed(0)}) sweep [${minR}, ${maxR}] → bestR=${bestR} grad=${bestGrad.toFixed(0)}`,
+    const blurKernel = h >= 1600 ? 23 : 15;
+    const houghInput = scope.track(new cv.Mat());
+    cv.GaussianBlur(
+      roiBlurred,
+      houghInput,
+      new cv.Size(blurKernel, blurKernel),
+      0,
     );
 
-    if (bestR === 0 || bestGrad < COIN_MIN_RIM_GRADIENT) {
-      // 사용자 탭 위치에서 동전 rim 안 보임 — 잘못 탭했거나 동전 없음
+    // ROI Hough — param2 30 (본 Hough 50 보다 완화. ROI 좁아 false positive
+    // 위험 작음 + partial-shadow rim 도 검출).
+    const circles = scope.track(new cv.Mat());
+    cv.HoughCircles(
+      houghInput,
+      circles,
+      cv.HOUGH_GRADIENT,
+      1,
+      Math.max(50, h / 3),
+      100,
+      30,
+      Math.round(Math.min(w, h) * 0.05),
+      Math.round(Math.min(w, h) * 0.45),
+    );
+    const numCircles = circles.cols;
+    console.log(
+      `[coin-detect][tap] hint=(${cxHint.toFixed(0)},${cyHint.toFixed(0)}) ROI=${w}×${h}@(${x0},${y0}) → ${numCircles} circles`,
+    );
+
+    if (numCircles === 0) {
       throw {
         kind: "no_coin",
         candidates: [
           {
-            position: derivePosition(cx, cy, gray.cols, gray.rows),
+            position: derivePosition(cxHint, cyHint, gray.cols, gray.rows),
             rejectReason: "weak_rim",
             debug: {
-              cxRel: cx / gray.cols,
-              cyRel: cy / gray.rows,
-              rRel: bestR / gray.cols,
+              cxRel: cxHint / gray.cols,
+              cyRel: cyHint / gray.rows,
+              rRel: 0,
               mean: 0,
-              rimGradient: bestGrad,
+              rimGradient: 0,
             },
           },
         ],
       } satisfies AnalysisError;
     }
 
-    // 같은 reject filter (mean/stddev/exterior/grad) — 사용자 탭 정확도
-    // 검증. 잘못 탭한 경우 (커피 입자 위 등) rejection 으로 명시 실패.
-    const interior = intensityStatsInCircle(gray, cx, cy, bestR);
-    const exterior = meanIntensityRingOutside(gray, cx, cy, bestR);
+    // hint 와 가장 가까운 circle 선택 (ROI 좌표계)
+    const cxHintRoi = cxHint - x0;
+    const cyHintRoi = cyHint - y0;
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < numCircles; i++) {
+      const cxR = circles.data32F[i * 3];
+      const cyR = circles.data32F[i * 3 + 1];
+      const d = Math.hypot(cxR - cxHintRoi, cyR - cyHintRoi);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    const cx = circles.data32F[bestIdx * 3] + x0;
+    const cy = circles.data32F[bestIdx * 3 + 1] + y0;
+    const r = circles.data32F[bestIdx * 3 + 2];
+
+    // 전체 이미지 좌표계에서 검증
+    const interior = intensityStatsInCircle(gray, cx, cy, r);
+    const exterior = meanIntensityRingOutside(gray, cx, cy, r);
+    const rimGrad = meanRimGradient(grayOriginal, cx, cy, r);
     const annotated: AnnotatedCircle = {
       cx,
       cy,
-      r: bestR,
+      r,
       mean: interior.mean,
       stddev: interior.stddev,
       exterior,
-      rimGradient: bestGrad,
+      rimGradient: rimGrad,
     };
-    const reason = deriveRejectReason(annotated);
+    console.log(
+      `[coin-detect][tap] selected r=${r.toFixed(1)}@(${cx.toFixed(0)},${cy.toFixed(0)}) i=${annotated.mean.toFixed(0)}±${annotated.stddev.toFixed(0)} ext=${annotated.exterior.toFixed(0)} grad=${annotated.rimGradient.toFixed(0)}`,
+    );
+    // 사용자가 *명시적으로* 코인 위치 탭 → CLAHE retry 와 동일 bypass=35
+    // 완화 적용 (그림자 진 marginal coin 에서도 통과). 일반 Hough 경로 의
+    // 기본 50 보다 완화 — 사용자 의도 신뢰.
+    const reason = deriveRejectReason(
+      annotated,
+      COIN_GRADIENT_STRONG_BYPASS_RELAXED,
+    );
     if (reason !== null) {
-      console.warn(
-        `[coin-detect][tap] reject: r=${bestR}@(${cx.toFixed(0)},${cy.toFixed(0)}) i=${annotated.mean.toFixed(0)}±${annotated.stddev.toFixed(0)} ext=${annotated.exterior.toFixed(0)} grad=${annotated.rimGradient.toFixed(0)} → ${reason}`,
-      );
       throw {
         kind: "no_coin",
         candidates: [
@@ -524,7 +571,7 @@ async function detectCoinFromHint(
             debug: {
               cxRel: cx / gray.cols,
               cyRel: cy / gray.rows,
-              rRel: bestR / gray.cols,
+              rRel: r / gray.cols,
               mean: annotated.mean,
               rimGradient: annotated.rimGradient,
             },
@@ -534,31 +581,20 @@ async function detectCoinFromHint(
     }
 
     // partial_coin 경고만 (hint 명시 신뢰)
-    if (
-      cx - bestR < 0 ||
-      cy - bestR < 0 ||
-      cx + bestR > gray.cols ||
-      cy + bestR > gray.rows
-    ) {
+    if (cx - r < 0 || cy - r < 0 || cx + r > gray.cols || cy + r > gray.rows) {
       console.warn(
-        `[coin-detect][tap] hint 동전이 이미지 경계 잘림 — mmPerPixel 부정확 가능. r=${bestR} center=(${cx.toFixed(0)},${cy.toFixed(0)})`,
+        `[coin-detect][tap] hint 동전이 이미지 경계 잘림 — mmPerPixel 부정확 가능. r=${r.toFixed(1)} center=(${cx.toFixed(0)},${cy.toFixed(0)})`,
       );
     }
 
     const diameterMm =
       coinType === "100" ? COIN_100_DIAMETER_MM : COIN_500_DIAMETER_MM;
-    const mmPerPixel = diameterMm / (bestR * 2);
-    const confidence = computeCoinConfidence(
-      cx,
-      cy,
-      bestR,
-      gray.cols,
-      gray.rows,
-    );
+    const mmPerPixel = diameterMm / (r * 2);
+    const confidence = computeCoinConfidence(cx, cy, r, gray.cols, gray.rows);
     return {
       centerX: cx,
       centerY: cy,
-      radiusPx: bestR,
+      radiusPx: r,
       coinType,
       diameterMm,
       mmPerPixel,

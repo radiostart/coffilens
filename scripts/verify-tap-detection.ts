@@ -174,28 +174,35 @@ async function main() {
   const dom = await setupGlobals();
   const { detectCoin } = await import(resolve(ROOT, "src/opencv/coin-detect.ts"));
   console.log(
-    `${"fixture".padEnd(36)}  baseline_r  hint_r  Δ      mmPerPx_baseline  mmPerPx_hint`,
+    `${"fixture".padEnd(36)}  scenario           baseline_r  hint_r  Δ`,
   );
+
+  // 시나리오: 정확 탭 + off-center 탭 (사용자 실 탭 부정확성 시뮬레이션)
+  const scenarios = [
+    { label: "center", offsetX: 0, offsetY: 0 },
+    { label: "off+30,+30", offsetX: 30, offsetY: 30 },
+    { label: "off-30,-30", offsetX: -30, offsetY: -30 },
+    { label: "off+50,0", offsetX: 50, offsetY: 0 },
+  ];
+
   for (const fx of FIXTURES) {
     const canvas = await decodeToCanvas(resolve(ROOT, fx.path), dom);
-    // hint 좌표는 baseline coin 중심 (사용자가 정확히 탭 시뮬레이션)
-    const hint = {
-      x: fx.baselineCx / canvas.width,
-      y: fx.baselineCy / canvas.height,
-    };
-    try {
-      const result = await detectCoin(canvas, fx.coinType, hint);
-      const diameterMm = fx.coinType === "100" ? 24 : 26.5;
-      const baselineMmPerPx = diameterMm / (fx.baselineR * 2);
-      const delta = result.radiusPx - fx.baselineR;
-      console.log(
-        `${basename(fx.path).padEnd(36)}  ${fx.baselineR.toFixed(1).padStart(10)}  ${result.radiusPx.toFixed(1).padStart(6)}  ${(delta >= 0 ? "+" : "") + delta.toFixed(1).padStart(5)}  ${baselineMmPerPx.toFixed(4).padStart(16)}  ${result.mmPerPixel.toFixed(4).padStart(12)}`,
-      );
-    } catch (e: unknown) {
-      const kind = (e as { kind?: string }).kind ?? String(e);
-      console.log(
-        `${basename(fx.path).padEnd(36)}  ${fx.baselineR.toFixed(1).padStart(10)}  ERROR: ${kind}`,
-      );
+    for (const sc of scenarios) {
+      const cxPx = fx.baselineCx + sc.offsetX;
+      const cyPx = fx.baselineCy + sc.offsetY;
+      const hint = { x: cxPx / canvas.width, y: cyPx / canvas.height };
+      try {
+        const result = await detectCoin(canvas, fx.coinType, hint);
+        const delta = result.radiusPx - fx.baselineR;
+        console.log(
+          `${basename(fx.path).padEnd(36)}  ${sc.label.padEnd(18)} ${fx.baselineR.toFixed(1).padStart(10)}  ${result.radiusPx.toFixed(1).padStart(6)}  ${(delta >= 0 ? "+" : "") + delta.toFixed(1).padStart(5)}`,
+        );
+      } catch (e: unknown) {
+        const kind = (e as { kind?: string }).kind ?? String(e);
+        console.log(
+          `${basename(fx.path).padEnd(36)}  ${sc.label.padEnd(18)} ${fx.baselineR.toFixed(1).padStart(10)}  ERROR: ${kind}`,
+        );
+      }
     }
   }
 }

@@ -230,23 +230,7 @@ describe("detectCoin — 분기 동작", () => {
     expect(result.mmPerPixel).toBeLessThan(0.3);
   });
 
-  it("hint 제공 시 Hough 바이패스 (tap-based 1D radius sweep) — HoughCircles 미호출", async () => {
-    // 새 dispatch (2026-05-09): hint 있으면 detectCoinFromHint 로 위임,
-    // Hough 의 3D 탐색 우회. cv.HoughCircles 호출 안 됨이 핵심 검증.
-    const { cv } = setupCvMock({
-      circles: [],
-      imgRows: 1280,
-      imgCols: 720,
-    });
-    try {
-      await detectCoin(fakeCanvas(), "500", { x: 0.5, y: 0.5 });
-    } catch {
-      // 결과는 mock 데이터 의존 — 여기선 dispatch 만 검증
-    }
-    expect(cv.HoughCircles).not.toHaveBeenCalled();
-  });
-
-  it("hint 없으면 Hough 경로 — HoughCircles 호출됨", async () => {
+  it("hint 없으면 본 Hough 경로 — HoughCircles 호출됨", async () => {
     const { cv } = setupCvMock({
       circles: [360, 640, 80],
       imgRows: 1280,
@@ -256,18 +240,9 @@ describe("detectCoin — 분기 동작", () => {
     expect(cv.HoughCircles).toHaveBeenCalled();
   });
 
-  it("hint 정상 + sweep 으로 r 찾기 — 합리 mmPerPixel 반환", async () => {
-    // mock 의 uniform stripe 데이터 → meanRimGradient 가 r 마다 비슷한 값.
-    // 1D sweep peak 위치는 stripe 주기성 의존 — 정확한 r 은 deterministic
-    // 이지만 fixture 회귀 테스트로 검증, 여기선 합리 범위만.
-    setupCvMock({ imgRows: 1280, imgCols: 720 });
-    const result = await detectCoin(fakeCanvas(), "500", { x: 0.5, y: 0.5 });
-    expect(result.centerX).toBeCloseTo(360, 0);
-    expect(result.centerY).toBeCloseTo(640, 0);
-    expect(result.radiusPx).toBeGreaterThan(0);
-    expect(result.coinType).toBe("500");
-    expect(result.mmPerPixel).toBeGreaterThan(0);
-  });
+  // 참고: hint 경로 (detectCoinFromHint) 의 ROI Hough 동작은 fixture-based
+  // 검증 (scripts/verify-tap-detection.ts) 으로 회귀 보호. mock 환경에서 ROI
+  // 좌표계 + Mat 복사 설정이 비현실적이라 unit 검증은 fixture 가 적절.
 });
 
 describe("computeCoinConfidence — 휴리스틱 점수", () => {
